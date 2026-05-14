@@ -49,6 +49,21 @@ public class AppConfig {
     @Value("${finvibe.kis.timeout-ms:5000}")
     private int kisTimeoutMs;
 
+    @Value("${finvibe.naver.news.enabled:false}")
+    private boolean naverNewsEnabled;
+
+    @Value("${finvibe.naver.news.base-url:https://openapi.naver.com/v1/search/news.json}")
+    private String naverNewsBaseUrl;
+
+    @Value("${finvibe.naver.news.client-id:}")
+    private String naverNewsClientId;
+
+    @Value("${finvibe.naver.news.client-secret:}")
+    private String naverNewsClientSecret;
+
+    @Value("${finvibe.naver.news.timeout-ms:7000}")
+    private int naverNewsTimeoutMs;
+
     @Value("${finvibe.ai.openrouter.enabled:false}")
     private boolean openRouterEnabled;
 
@@ -125,6 +140,30 @@ public class AppConfig {
 
     public int kisTimeoutMs() {
         return kisTimeoutMs;
+    }
+
+    public boolean naverNewsEnabled() {
+        return naverNewsEnabled
+                && naverNewsClientId() != null && !naverNewsClientId().isBlank()
+                && naverNewsClientSecret() != null && !naverNewsClientSecret().isBlank();
+    }
+
+    public String naverNewsBaseUrl() {
+        return naverNewsBaseUrl == null || naverNewsBaseUrl.isBlank()
+                ? "https://openapi.naver.com/v1/search/news.json"
+                : naverNewsBaseUrl;
+    }
+
+    public String naverNewsClientId() {
+        return naverNewsClientId == null ? "" : naverNewsClientId;
+    }
+
+    public String naverNewsClientSecret() {
+        return naverNewsClientSecret == null ? "" : naverNewsClientSecret;
+    }
+
+    public int naverNewsTimeoutMs() {
+        return naverNewsTimeoutMs;
     }
 
     public boolean openRouterEnabled() {

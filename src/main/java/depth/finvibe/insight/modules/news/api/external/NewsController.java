@@ -1,5 +1,6 @@
 package depth.finvibe.insight.modules.news.api.external;
 
+import depth.finvibe.insight.modules.news.application.service.NaverNewsService;
 import depth.finvibe.shared.http.ApiException;
 import depth.finvibe.shared.persistence.mongo.news.ThemeNewsDocument;
 import depth.finvibe.shared.persistence.mongo.news.ThemeNewsRepository;
@@ -18,10 +19,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class NewsController {
     private final AppState state;
     private final ThemeNewsRepository themeNewsRepository;
+    private final NaverNewsService naverNewsService;
 
-    public NewsController(AppState state, ThemeNewsRepository themeNewsRepository) {
+    public NewsController(AppState state, ThemeNewsRepository themeNewsRepository, NaverNewsService naverNewsService) {
         this.state = state;
         this.themeNewsRepository = themeNewsRepository;
+        this.naverNewsService = naverNewsService;
     }
 
     @GetMapping("/news")
@@ -30,6 +33,12 @@ public class NewsController {
         int resolvedLimit = Math.max(1, Math.min(100, limit));
         List<Map<String, Object>> rows = flattenNews(themeId);
         return rows.subList(0, Math.min(resolvedLimit, rows.size()));
+    }
+
+    @GetMapping("/news/economy")
+    public Object economyNews(@RequestParam(defaultValue = "1") int start,
+                              @RequestParam(defaultValue = "20") int display) {
+        return naverNewsService.economyNews(start, display);
     }
 
     @GetMapping("/news/{newsId}")
