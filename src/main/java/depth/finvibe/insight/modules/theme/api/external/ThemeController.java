@@ -84,7 +84,10 @@ public class ThemeController {
         Map<String, Object> summary = categorySummary(normalizeCategory(categoryId));
         return Maps.of(
                 "categoryId", summary.get("id"),
-                "averageChangeRate", summary.get("averageChangeRate")
+                "categoryName", summary.get("name"),
+                "changeRate", summary.get("averageChangeRate"),
+                "averageChangeRate", summary.get("averageChangeRate"),
+                "themeCount", summary.get("themeCount")
         );
     }
 
@@ -96,10 +99,31 @@ public class ThemeController {
         for (Map<String, Object> theme : themes) {
             String stockId = Maps.str(theme, "topStockId");
             if (stockId != null) {
-                rows.add(state.getStockDetail(stockId));
+                rows.add(categoryStock(theme, stockId, category));
             }
         }
         return rows;
+    }
+
+    private Map<String, Object> categoryStock(Map<String, Object> theme, String stockId, String category) {
+        try {
+            return state.getStockDetail(stockId);
+        } catch (RuntimeException ignored) {
+            return Maps.of(
+                    "stockId", stockId,
+                    "id", stockId,
+                    "symbol", "",
+                    "code", "",
+                    "name", Maps.str(theme, "topStockName", Maps.str(theme, "topStock", "")),
+                    "categoryId", category,
+                    "close", Maps.doubleVal(theme, "basePrice", 0.0),
+                    "price", Maps.doubleVal(theme, "basePrice", 0.0),
+                    "prevDayChangePct", parseChangeRate(Maps.str(theme, "change", "0")),
+                    "changeRate", parseChangeRate(Maps.str(theme, "change", "0")),
+                    "volume", 0,
+                    "value", 0
+            );
+        }
     }
 
     private List<Map<String, Object>> themeNewsItems(String themeId) {
@@ -153,6 +177,17 @@ public class ThemeController {
             case "industry", "style", "all" -> category.toLowerCase();
             default -> category.toLowerCase();
         };
+    }
+
+    private double parseChangeRate(String value) {
+        if (value == null || value.isBlank()) {
+            return 0.0;
+        }
+        try {
+            return Double.parseDouble(value.replace("%", "").replace("+", "").trim());
+        } catch (NumberFormatException ignored) {
+            return 0.0;
+        }
     }
 
     private int clamp(int value, int min, int max) {

@@ -7,8 +7,12 @@ import depth.finvibe.shared.util.Maps;
 import depth.finvibe.shared.util.TimeUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.ZonedDateTime;
+import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -132,6 +136,10 @@ public final class MarketService {
                     if (!candles.isEmpty()) {
                         return candles;
                     }
+                    List<Map<String, Object>> aggregated = fetchAggregatedKisCandles(stock, timeframe, resolvedPoints);
+                    if (!aggregated.isEmpty()) {
+                        return aggregated;
+                    }
                 } else if (timeframe.endsWith("min")) {
                     List<Map<String, Object>> candles = kisClient.fetchDomesticMinuteChart(Maps.str(stock, "code"), timeframe, resolvedPoints);
                     if (!candles.isEmpty()) {
@@ -146,6 +154,156 @@ public final class MarketService {
             }
         }
         return List.of();
+    }
+
+    private List<Map<String, Object>> fetchAggregatedKisCandles(Map<String, Object> stock, String timeframe, int points) {
+        String sourceTimeframe = switch (timeframe) {
+            case "week", "month" -> "day";
+            case "year" -> "month";
+            default -> null;
+        };
+        if (sourceTimeframe == null) {
+            return List.of();
+        }
+
+        int sourcePoints = switch (timeframe) {
+            case "week" -> Math.max(points * 7, 90);
+            case "month" -> Math.max(points * 31, 365);
+            case "year" -> Math.max(points * 12, 120);
+            default -> points;
+        };
+
+        try {
+            List<Map<String, Object>> source = kisClient.fetchDomesticDailyChart(
+                    Maps.str(stock, "code"),
+                    sourceTimeframe,
+                    sourcePoints
+            );
+            return aggregateCandles(source, timeframe, points, Maps.str(stock, "id"));
+        } catch (Exception e) {
+            log.warn("KIS candle aggregation fallback failed. stockId={}, code={}, timeframe={}, points={}",
+                    Maps.str(stock, "id"), Maps.str(stock, "code"), timeframe, points, e);
+            return List.of();
+        }
+    }
+
+    private List<Map<String, Object>> aggregateCandles(List<Map<String, Object>> source, String timeframe, int points, String stockId) {
+        if (source == null || source.isEmpty()) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> sorted = source.stream()
+                .filter(item -> parseCandleDate(item) != null)
+                .sorted(Comparator.comparing(this::parseCandleDate))
+                .toList();
+        if (sorted.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, AggregatedCandle> buckets = new LinkedHashMap<>();
+        for (Map<String, Object> candle : sorted) {
+            LocalDate date = parseCandleDate(candle);
+            if (date == null) {
+                continue;
+            }
+            String key = candleBucketKey(date, timeframe);
+            LocalDate bucketDate = candleBucketDate(date, timeframe);
+            AggregatedCandle bucket = buckets.computeIfAbsent(key, ignored -> new AggregatedCandle(bucketDate));
+            bucket.add(candle);
+        }
+
+        List<Map<String, Object>> rows = buckets.values().stream()
+                .map(bucket -> bucket.toRow(stockId, timeframe))
+                .toList();
+
+        if (rows.size() <= points) {
+            return rows;
+        }
+        return new ArrayList<>(rows.subList(rows.size() - points, rows.size()));
+    }
+
+    private LocalDate parseCandleDate(Map<String, Object> candle) {
+        String at = Maps.str(candle, "at");
+        if (at == null || at.isBlank()) {
+            return null;
+        }
+        try {
+            return ZonedDateTime.parse(at).toLocalDate();
+        } catch (Exception ignored) {
+        }
+        try {
+            return LocalDate.parse(at.split("T")[0]);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String candleBucketKey(LocalDate date, String timeframe) {
+        return switch (timeframe) {
+            case "week" -> date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).toString();
+            case "month" -> date.getYear() + "-" + String.format("%02d", date.getMonthValue());
+            case "year" -> String.valueOf(date.getYear());
+            default -> date.toString();
+        };
+    }
+
+    private LocalDate candleBucketDate(LocalDate date, String timeframe) {
+        return switch (timeframe) {
+            case "week" -> date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+            case "month" -> LocalDate.of(date.getYear(), date.getMonthValue(), 1);
+            case "year" -> LocalDate.of(date.getYear(), 1, 1);
+            default -> date;
+        };
+    }
+
+    private static final class AggregatedCandle {
+        private final LocalDate at;
+        private double open;
+        private double high;
+        private double low;
+        private double close;
+        private long volume;
+        private long value;
+        private boolean initialized;
+
+        private AggregatedCandle(LocalDate at) {
+            this.at = at;
+        }
+
+        private void add(Map<String, Object> candle) {
+            double candleOpen = Maps.doubleVal(candle, "open", Maps.doubleVal(candle, "close"));
+            double candleHigh = Maps.doubleVal(candle, "high", candleOpen);
+            double candleLow = Maps.doubleVal(candle, "low", candleOpen);
+            double candleClose = Maps.doubleVal(candle, "close", candleOpen);
+            if (!initialized) {
+                open = candleOpen;
+                high = candleHigh;
+                low = candleLow;
+                initialized = true;
+            } else {
+                high = Math.max(high, candleHigh);
+                low = Math.min(low, candleLow);
+            }
+            close = candleClose;
+            volume += Maps.longVal(candle.get("volume"), 0L);
+            value += Maps.longVal(candle.get("value"), 0L);
+        }
+
+        private Map<String, Object> toRow(String stockId, String timeframe) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("stockId", stockId);
+            row.put("timeframe", timeframe.toUpperCase());
+            row.put("at", at.atStartOfDay(TimeUtil.SEOUL).toString());
+            row.put("open", open);
+            row.put("high", high);
+            row.put("low", low);
+            row.put("close", close);
+            row.put("volume", volume);
+            row.put("value", value);
+            row.put("prevDayChangePct", 0);
+            row.put("dataSource", "kis-aggregated");
+            return row;
+        }
     }
 
     public List<Map<String, Object>> getIndexCandles(String indexCode, String timeframe, int points) {

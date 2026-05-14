@@ -3,18 +3,18 @@
     "name": "AI 테마",
     "category": "industry",
     "stocks": [
-      "엔비디아",
-      "OpenAI",
-      "Anthropic"
+      "NAVER",
+      "삼성전자",
+      "SK하이닉스"
     ],
     "change": "+6.45%",
     "summary": "생성형 AI 기술 혁명. ChatGPT 등 AI 서비스 글로벌 확산",
     "color": "#8b5cf6",
-    "topStock": "엔비디아",
-    "basePrice": 892300,
+    "topStock": "NAVER",
+    "basePrice": 178000,
     "id": "01-ai",
-    "topStockId": "9",
-    "topStockName": "NVIDIA"
+    "topStockId": "3",
+    "topStockName": "NAVER"
   },
   {
     "name": "반도체 테마",
@@ -22,7 +22,7 @@
     "stocks": [
       "SK하이닉스",
       "삼성전자",
-      "TSMC"
+      "삼성전기"
     ],
     "change": "+4.89%",
     "summary": "글로벌 반도체 수요 증가. 메모리 및 시스템 반도체 강세",
@@ -37,18 +37,18 @@
     "name": "전기차 테마",
     "category": "industry",
     "stocks": [
-      "Tesla",
-      "BYD",
-      "Rivian"
+      "현대차",
+      "기아",
+      "현대모비스"
     ],
     "change": "+5.12%",
     "summary": "전기차 시장 급성장. 배터리 기술 발전 및 충전 인프라 확대",
     "color": "#22c55e",
-    "topStock": "Tesla",
-    "basePrice": 445600,
+    "topStock": "현대차",
+    "basePrice": 234500,
     "id": "03-theme-3",
-    "topStockId": "7",
-    "topStockName": "Tesla"
+    "topStockId": "63",
+    "topStockName": "현대차"
   },
   {
     "name": "플랫폼 테마",
@@ -56,7 +56,7 @@
     "stocks": [
       "NAVER",
       "카카오",
-      "쿠팡"
+      "NAVER웹툰"
     ],
     "change": "+3.67%",
     "summary": "디지털 플랫폼 경쟁 심화. 커머스·금융·콘텐츠 통합 서비스 확대",
@@ -72,8 +72,8 @@
     "category": "industry",
     "stocks": [
       "한화에어로스페이스",
-      "SpaceX",
-      "Blue Origin"
+      "한국항공우주",
+      "LIG넥스원"
     ],
     "change": "+5.67%",
     "summary": "민간 우주산업 본격화. 누리호 성공 및 위성 발사 시장 확대",
@@ -275,18 +275,18 @@
     "name": "성장주",
     "category": "style",
     "stocks": [
-      "엔비디아",
-      "Tesla",
-      "크래프톤"
+      "크래프톤",
+      "NAVER",
+      "삼성바이오로직스"
     ],
     "change": "+6.78%",
     "summary": "기술주 중심 성장주 강세. 미래 성장 가능성 높은 종목에 자금 집중",
     "color": "#8b5cf6",
-    "topStock": "엔비디아",
-    "basePrice": 892300,
+    "topStock": "크래프톤",
+    "basePrice": 218000,
     "id": "17-theme-17",
-    "topStockId": "9",
-    "topStockName": "NVIDIA"
+    "topStockId": "55",
+    "topStockName": "크래프톤"
   },
   {
     "name": "가치주",

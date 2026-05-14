@@ -4,7 +4,7 @@
       "id": "01-ai-news-1",
       "publisher": "매일경제",
       "timeAgo": "2시간 전",
-      "title": "NVIDIA 중심으로 AI 테마 관련 수급 확대"
+      "title": "NAVER 중심으로 AI 테마 관련 수급 확대"
     },
     {
       "id": "01-ai-news-2",
@@ -16,7 +16,7 @@
       "id": "01-ai-news-3",
       "publisher": "서울경제",
       "timeAgo": "6시간 전",
-      "title": "AI 테마 관심 증가… 엔비디아, OpenAI 주목"
+      "title": "AI 테마 관심 증가… NAVER, 삼성전자 주목"
     }
   ],
   "02-theme-2": [
@@ -44,7 +44,7 @@
       "id": "03-theme-3-news-1",
       "publisher": "서울경제",
       "timeAgo": "2시간 전",
-      "title": "Tesla 중심으로 전기차 테마 관련 수급 확대"
+      "title": "현대차 중심으로 전기차 테마 관련 수급 확대"
     },
     {
       "id": "03-theme-3-news-2",
@@ -56,7 +56,7 @@
       "id": "03-theme-3-news-3",
       "publisher": "조선비즈",
       "timeAgo": "6시간 전",
-      "title": "전기차 테마 관심 증가… Tesla, BYD 주목"
+      "title": "전기차 테마 관심 증가… 현대차, 기아 주목"
     }
   ],
   "04-theme-4": [
@@ -96,7 +96,7 @@
       "id": "05-theme-5-news-3",
       "publisher": "한국경제",
       "timeAgo": "6시간 전",
-      "title": "우주항공 테마 관심 증가… 한화에어로스페이스, SpaceX 주목"
+      "title": "우주항공 테마 관심 증가… 한화에어로스페이스, 한국항공우주 주목"
     }
   ],
   "06-2": [
@@ -324,7 +324,7 @@
       "id": "17-theme-17-news-1",
       "publisher": "한국경제",
       "timeAgo": "2시간 전",
-      "title": "NVIDIA 중심으로 성장주 관련 수급 확대"
+      "title": "크래프톤 중심으로 성장주 관련 수급 확대"
     },
     {
       "id": "17-theme-17-news-2",
@@ -336,7 +336,7 @@
       "id": "17-theme-17-news-3",
       "publisher": "이데일리",
       "timeAgo": "6시간 전",
-      "title": "성장주 관심 증가… 엔비디아, Tesla 주목"
+      "title": "성장주 관심 증가… 크래프톤, NAVER 주목"
     }
   ],
   "18-theme-18": [

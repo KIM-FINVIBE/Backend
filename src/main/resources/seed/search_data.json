@@ -11,24 +11,24 @@
       "type": "domestic"
     },
     {
-      "name": "Apple",
-      "code": "AAPL",
-      "type": "foreign"
+      "name": "NAVER",
+      "code": "035420",
+      "type": "domestic"
     },
     {
-      "name": "Tesla",
-      "code": "TSLA",
-      "type": "foreign"
+      "name": "현대차",
+      "code": "005380",
+      "type": "domestic"
     },
     {
-      "name": "NVIDIA",
-      "code": "NVDA",
-      "type": "foreign"
+      "name": "LG에너지솔루션",
+      "code": "373220",
+      "type": "domestic"
     },
     {
-      "name": "Microsoft",
-      "code": "MSFT",
-      "type": "foreign"
+      "name": "카카오",
+      "code": "035720",
+      "type": "domestic"
     }
   ],
   "learning": [
