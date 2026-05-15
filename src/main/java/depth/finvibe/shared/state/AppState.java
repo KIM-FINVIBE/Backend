@@ -318,36 +318,15 @@ public final class AppState {
 
     public Map<String, Object> search(String query, int limit) {
         String q = FinvibeUtils.normalizeText(query);
-        List<Map<String, Object>> stockResults = new ArrayList<>();
-        for (Map<String, Object> stock : stocksSeed) {
-            List<String> haystack = new ArrayList<>();
-            haystack.add(Maps.str(stock, "name"));
-            haystack.add(Maps.str(stock, "code"));
-            haystack.addAll(toStringList(stock.get("aliases")));
-            boolean matches = q.isBlank();
-            for (String candidate : haystack) {
-                if (FinvibeUtils.normalizeText(candidate).contains(q)) {
-                    matches = true;
-                    break;
-                }
-            }
-            if (matches) {
-                stockResults.add(mapOf(
-                        "stockId", Maps.str(stock, "id"),
-                        "name", Maps.str(stock, "name"),
-                        "code", Maps.str(stock, "code"),
-                        "type", Maps.str(stock, "type"),
-                        "aliases", toStringList(stock.get("aliases"))
-                ));
-            }
-        }
-        stockResults.sort(Comparator.comparing((Map<String, Object> row) -> FinvibeUtils.normalizeText(Maps.str(row, "name")).startsWith(q) ? 0 : 1)
-                .thenComparing(row -> Maps.str(row, "name")));
+        List<Map<String, Object>> stockResults = searchStocks(query, limit);
 
         List<Map<String, Object>> learningResults = new ArrayList<>();
         List<String> seenTitles = new ArrayList<>();
         for (Map<String, Object> item : learningContentSeed) {
-            if (q.isBlank() || FinvibeUtils.normalizeText(Maps.str(item, "title")).contains(q)) {
+            if (q.isBlank()
+                    || FinvibeUtils.normalizeText(Maps.str(item, "title")).contains(q)
+                    || FinvibeUtils.normalizeText(Maps.str(item, "category")).contains(q)
+                    || FinvibeUtils.normalizeText(Maps.str(item, "contentType")).contains(q)) {
                 seenTitles.add(Maps.str(item, "title"));
                 learningResults.add(copyMap(item));
             }
@@ -356,11 +335,14 @@ public final class AppState {
             if (seenTitles.contains(Maps.str(course, "title"))) {
                 continue;
             }
-            if (q.isBlank() || FinvibeUtils.normalizeText(Maps.str(course, "title")).contains(q)) {
+            String level = FinvibeUtils.levelToKorean(Maps.str(course, "level"));
+            if (q.isBlank()
+                    || FinvibeUtils.normalizeText(Maps.str(course, "title")).contains(q)
+                    || FinvibeUtils.normalizeText(level).contains(q)) {
                 learningResults.add(mapOf(
                         "id", Maps.str(course, "id"),
                         "title", Maps.str(course, "title"),
-                        "category", FinvibeUtils.levelToKorean(Maps.str(course, "level")),
+                        "category", level,
                         "contentType", "course"
                 ));
             }
@@ -368,7 +350,7 @@ public final class AppState {
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("query", query);
-        result.put("stocks", stockResults.subList(0, Math.min(limit, stockResults.size())));
+        result.put("stocks", stockResults);
         result.put("learning", learningResults.subList(0, Math.min(limit, learningResults.size())));
         return result;
     }
@@ -376,6 +358,36 @@ public final class AppState {
     @SuppressWarnings("unchecked")
     public List<Map<String, Object>> stockSearchOnly(String query, int limit) {
         return (List<Map<String, Object>>) search(query, limit).get("stocks");
+    }
+
+    private List<Map<String, Object>> searchStocks(String query, int limit) {
+        String q = FinvibeUtils.normalizeText(query);
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map<String, Object> stock : listStocks("all", query, null)) {
+            rows.add(mapOf(
+                    "stockId", Maps.str(stock, "id"),
+                    "id", Maps.str(stock, "id"),
+                    "name", Maps.str(stock, "name"),
+                    "code", Maps.str(stock, "code"),
+                    "type", Maps.str(stock, "type"),
+                    "nameEn", Maps.str(stock, "nameEn"),
+                    "marketSegment", Maps.str(stock, "marketSegment"),
+                    "currency", Maps.str(stock, "currency"),
+                    "aliases", List.of()
+            ));
+        }
+        rows.sort(Comparator.comparing((Map<String, Object> row) -> {
+                    String name = FinvibeUtils.normalizeText(Maps.str(row, "name"));
+                    String code = FinvibeUtils.normalizeText(Maps.str(row, "code"));
+                    String nameEn = FinvibeUtils.normalizeText(Maps.str(row, "nameEn"));
+                    return !q.isBlank() && (name.startsWith(q) || code.startsWith(q) || nameEn.startsWith(q)) ? 0 : 1;
+                })
+                .thenComparing(row -> Maps.str(row, "name"))
+                .thenComparing(row -> Maps.str(row, "code")));
+        if (rows.size() > limit) {
+            return new ArrayList<>(rows.subList(0, limit));
+        }
+        return rows;
     }
 
     public List<Map<String, Object>> listStocks(String market, String query, Integer limit) {
@@ -386,7 +398,9 @@ public final class AppState {
             if (!q.isBlank()) {
                 String name = FinvibeUtils.normalizeText(Maps.str(stock, "name"));
                 String code = FinvibeUtils.normalizeText(Maps.str(stock, "code"));
-                if (!name.contains(q) && !code.contains(q)) {
+                String nameEn = FinvibeUtils.normalizeText(Maps.str(stock, "nameEn"));
+                String marketSegment = FinvibeUtils.normalizeText(Maps.str(stock, "marketSegment"));
+                if (!name.contains(q) && !code.contains(q) && !nameEn.contains(q) && !marketSegment.contains(q)) {
                     continue;
                 }
             }
