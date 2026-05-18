@@ -218,6 +218,61 @@ public class TradeService {
         return toOrderMap(order);
     }
 
+    @Transactional
+    public String processPendingOrder(String orderId) {
+        TradeOrderEntity order = tradeOrderRepository.lockPendingByOrderId(orderId).orElse(null);
+        if (order == null) {
+            return "skipped";
+        }
+
+        StockEntity stock = stockQueryService.requireStockEntity(order.getStockId());
+        Map<String, Object> snapshot = stockQueryService.stockSnapshot(stock);
+        double marketPrice = Maps.doubleVal(snapshot, "price");
+        if (marketPrice <= 0) {
+            return "waiting";
+        }
+
+        double roundedMarketPrice = stockQueryService.roundPrice(stock, marketPrice);
+        if (!shouldExecutePendingOrder(order, roundedMarketPrice)) {
+            return "waiting";
+        }
+
+        BigDecimal executionPrice = BigDecimal.valueOf(roundedMarketPrice).setScale(4, RoundingMode.HALF_UP);
+        BigDecimal quantity = order.getRemainingQuantity().compareTo(BigDecimal.ZERO) > 0
+                ? order.getRemainingQuantity()
+                : order.getQuantity();
+        long totalKrw = stockQueryService.resolvePriceKrw(stock, executionPrice.multiply(quantity).doubleValue());
+        WalletEntity wallet = walletService.requireWallet(order.getUserId());
+
+        if ("buy".equals(order.getSide())) {
+            long additionalCashNeeded = Math.max(0L, totalKrw - order.getReservedAmountKrw());
+            if (additionalCashNeeded > wallet.getWithdrawableCashKrw()) {
+                failPendingOrder(order, stock, wallet, "INSUFFICIENT_BALANCE", "예약 주문 체결 시 잔액이 부족합니다.");
+                return "failed";
+            }
+            settleReservedBuy(wallet, order.getUserId(), stock, executionPrice, quantity, totalKrw, order);
+        } else {
+            AssetEntity asset = assetRepository.findByUserIdAndStockId(order.getUserId(), stock.getStockId()).orElse(null);
+            if (asset == null || asset.getQuantity().compareTo(quantity) < 0) {
+                failPendingOrder(order, stock, wallet, "INSUFFICIENT_HOLDINGS", "예약 주문 체결 시 보유 수량이 부족합니다.");
+                return "failed";
+            }
+            settleSell(wallet, order.getUserId(), stock, executionPrice, quantity, totalKrw, order.getOrderId());
+        }
+
+        order.setOrderPrice(executionPrice);
+        order.setFilledQuantity(quantity);
+        order.setRemainingQuantity(BigDecimal.ZERO.setScale(8, RoundingMode.HALF_UP));
+        order.setReservedAmountKrw(0L);
+        order.setOrderStatus("completed");
+        order.setCompletedAt(LocalDateTime.now());
+        tradeOrderRepository.save(order);
+
+        appendOrderExecutedEvent(order, stock, totalKrw);
+        appendPortfolioUpdatedEvent(order.getUserId(), stock.getStockId(), order.getOrderId(), order.getSide(), order.getOrderStatus());
+        return "executed";
+    }
+
     private TradeOrderEntity requireOrder(String userId, String orderId) {
         return tradeOrderRepository.findByOrderIdAndUserId(orderId, userId)
                 .orElseThrow(() -> ApiException.notFound("ORDER_NOT_FOUND", "주문을 찾을 수 없습니다: " + orderId));
@@ -257,6 +312,34 @@ public class TradeService {
 
     private String newExecutionId() {
         return "exec-" + UUID.randomUUID();
+    }
+
+    private boolean shouldExecutePendingOrder(TradeOrderEntity order, double marketPrice) {
+        String condition = order.getAutoCondition() == null ? "" : order.getAutoCondition().trim().toLowerCase();
+        double threshold = order.getTriggerPrice() == null
+                ? order.getOrderPrice().doubleValue()
+                : order.getTriggerPrice().doubleValue();
+
+        if (!condition.isBlank()) {
+            return switch (condition) {
+                case "above", "gte", "greater_than_or_equal", "up" -> marketPrice >= threshold;
+                case "below", "lte", "less_than_or_equal", "down" -> marketPrice <= threshold;
+                default -> shouldExecuteLimitLikeOrder(order, marketPrice);
+            };
+        }
+
+        if ("market".equals(order.getPriceType())) {
+            return true;
+        }
+        return shouldExecuteLimitLikeOrder(order, marketPrice);
+    }
+
+    private boolean shouldExecuteLimitLikeOrder(TradeOrderEntity order, double marketPrice) {
+        double orderPrice = order.getOrderPrice().doubleValue();
+        if ("buy".equals(order.getSide())) {
+            return marketPrice <= orderPrice;
+        }
+        return marketPrice >= orderPrice;
     }
 
     private void settleBuy(WalletEntity wallet, String userId, StockEntity stock, BigDecimal orderPrice, BigDecimal quantity, long totalKrw, String orderId) {
@@ -306,6 +389,64 @@ public class TradeService {
 
         walletService.writeLedger(wallet, userId, "BUY_SETTLEMENT", "OUT", totalKrw, "ORDER", orderId, stock.getNameKr() + " 매수 체결");
         appendTradeFeed(userId, stock, orderId, "buy", quantity);
+    }
+
+    private void settleReservedBuy(WalletEntity wallet, String userId, StockEntity stock, BigDecimal orderPrice, BigDecimal quantity, long totalKrw, TradeOrderEntity order) {
+        long reservedAmount = Math.max(0L, order.getReservedAmountKrw());
+        long additionalCashNeeded = Math.max(0L, totalKrw - reservedAmount);
+        if (additionalCashNeeded > wallet.getWithdrawableCashKrw()) {
+            throw ApiException.conflict("INSUFFICIENT_BALANCE", "잔액이 부족합니다.");
+        }
+
+        wallet.setReservedCashKrw(Math.max(0L, wallet.getReservedCashKrw() - reservedAmount));
+        if (additionalCashNeeded > 0) {
+            wallet.setWithdrawableCashKrw(wallet.getWithdrawableCashKrw() - additionalCashNeeded);
+        }
+        long refundKrw = Math.max(0L, reservedAmount - totalKrw);
+        if (refundKrw > 0) {
+            wallet.setWithdrawableCashKrw(wallet.getWithdrawableCashKrw() + refundKrw);
+        }
+        wallet.setCashBalanceKrw(wallet.getCashBalanceKrw() - totalKrw);
+
+        AssetEntity asset = assetRepository.findByUserIdAndStockId(userId, stock.getStockId()).orElse(null);
+        if (asset == null) {
+            asset = new AssetEntity();
+            asset.setUserId(userId);
+            asset.setStockId(stock.getStockId());
+            asset.setFolderId(null);
+            asset.setQuantity(quantity);
+            asset.setAvgBuyPriceKrw(Math.round((double) totalKrw / quantity.doubleValue()));
+            asset.setCurrentPriceKrw(stockQueryService.resolvePriceKrw(stock, orderPrice.doubleValue()));
+            asset.setInvestedAmountKrw(totalKrw);
+            asset.setRealizedPnlKrw(0L);
+        } else {
+            BigDecimal newQty = asset.getQuantity().add(quantity);
+            long existingInvested = asset.getInvestedAmountKrw();
+            long newInvested = existingInvested + totalKrw;
+            asset.setQuantity(newQty);
+            asset.setInvestedAmountKrw(newInvested);
+            asset.setAvgBuyPriceKrw(Math.round((double) newInvested / newQty.doubleValue()));
+            asset.setCurrentPriceKrw(stockQueryService.resolvePriceKrw(stock, orderPrice.doubleValue()));
+        }
+        assetRepository.save(asset);
+
+        TradeExecutionEntity execution = new TradeExecutionEntity();
+        execution.setExecutionId(newExecutionId());
+        execution.setOrderId(order.getOrderId());
+        execution.setUserId(userId);
+        execution.setStockId(stock.getStockId());
+        execution.setSide("buy");
+        execution.setExecutedPrice(orderPrice);
+        execution.setExecutedQuantity(quantity);
+        execution.setGrossAmountKrw(totalKrw);
+        execution.setFeeKrw(0L);
+        execution.setTaxKrw(0L);
+        execution.setNetAmountKrw(totalKrw);
+        execution.setExecutedAt(LocalDateTime.now());
+        tradeExecutionRepository.save(execution);
+
+        walletService.writeLedger(wallet, userId, "BUY_SETTLEMENT", "OUT", totalKrw, "ORDER", order.getOrderId(), stock.getNameKr() + " 예약 매수 체결");
+        appendTradeFeed(userId, stock, order.getOrderId(), "buy", quantity);
     }
 
     private void settleSell(WalletEntity wallet, String userId, StockEntity stock, BigDecimal orderPrice, BigDecimal quantity, long totalKrw, String orderId) {
@@ -448,6 +589,52 @@ public class TradeService {
                 "ORDER",
                 order.getOrderId(),
                 "finvibe.order.canceled",
+                order.getUserId(),
+                payload
+        );
+    }
+
+    private void failPendingOrder(TradeOrderEntity order, StockEntity stock, WalletEntity wallet, String reasonCode, String message) {
+        long reservedAmount = Math.max(0L, order.getReservedAmountKrw());
+        if (reservedAmount > 0) {
+            wallet.setReservedCashKrw(Math.max(0L, wallet.getReservedCashKrw() - reservedAmount));
+            wallet.setWithdrawableCashKrw(wallet.getWithdrawableCashKrw() + reservedAmount);
+            walletService.appendWalletChangedEvent(
+                    wallet,
+                    order.getUserId(),
+                    "ORDER_FAILED_RELEASE",
+                    reservedAmount,
+                    "ORDER",
+                    order.getOrderId(),
+                    stock.getNameKr() + " 예약 주문 실패 환원"
+            );
+        }
+
+        order.setOrderStatus("failed");
+        order.setRemainingQuantity(order.getQuantity());
+        order.setReservedAmountKrw(0L);
+        order.setCanceledAt(LocalDateTime.now());
+        tradeOrderRepository.save(order);
+        appendOrderFailedEvent(order, stock, reasonCode, message, reservedAmount);
+    }
+
+    private void appendOrderFailedEvent(TradeOrderEntity order, StockEntity stock, String reasonCode, String message, long releasedReservedAmount) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("orderId", order.getOrderId());
+        payload.put("userId", order.getUserId());
+        payload.put("stockId", order.getStockId());
+        payload.put("stockName", stock.getNameKr());
+        payload.put("side", order.getSide());
+        payload.put("status", order.getOrderStatus());
+        payload.put("reasonCode", reasonCode);
+        payload.put("message", message);
+        payload.put("releasedReservedAmountKrw", releasedReservedAmount);
+        payload.put("failedAt", order.getCanceledAt() == null ? null : order.getCanceledAt().toString());
+
+        outboxJdbcRepository.append(
+                "ORDER",
+                order.getOrderId(),
+                "finvibe.order.failed",
                 order.getUserId(),
                 payload
         );

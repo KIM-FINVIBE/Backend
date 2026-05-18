@@ -42,7 +42,7 @@ public class StockCandleBackfillBatch {
     @Value("${finvibe.market.candle-backfill.page-size:50}")
     private int pageSize;
 
-    @Value("${finvibe.market.candle-backfill.max-pages-per-run:1}")
+    @Value("${finvibe.market.candle-backfill.max-pages-per-run:4}")
     private int maxPagesPerRun;
 
     @Value("${finvibe.market.candle-backfill.points:60}")
@@ -51,7 +51,7 @@ public class StockCandleBackfillBatch {
     @Value("${finvibe.market.candle-backfill.minimum-points:20}")
     private int minimumPoints;
 
-    @Value("${finvibe.market.candle-backfill.request-delay-ms:500}")
+    @Value("${finvibe.market.candle-backfill.request-delay-ms:300}")
     private long requestDelayMs;
 
     public StockCandleBackfillBatch(
@@ -74,7 +74,7 @@ public class StockCandleBackfillBatch {
         backfillDailyCandles("startup");
     }
 
-    @Scheduled(cron = "${finvibe.market.candle-backfill.cron:0 3/10 * * * *}", zone = "Asia/Seoul")
+    @Scheduled(cron = "${finvibe.market.candle-backfill.cron:0 3/5 * * * *}", zone = "Asia/Seoul")
     public void backfillOnSchedule() {
         if (!enabled || !scheduleEnabled) {
             return;
