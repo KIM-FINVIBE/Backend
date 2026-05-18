@@ -65,6 +65,15 @@ public class TradeOrderEntity {
     @Column(name = "canceled_at")
     private LocalDateTime canceledAt;
 
+    @Column(name = "failure_reason_code", length = 50)
+    private String failureReasonCode;
+
+    @Column(name = "failure_message", length = 255)
+    private String failureMessage;
+
+    @Column(name = "failed_at")
+    private LocalDateTime failedAt;
+
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
@@ -103,6 +112,12 @@ public class TradeOrderEntity {
     public void setCompletedAt(LocalDateTime completedAt) { this.completedAt = completedAt; }
     public LocalDateTime getCanceledAt() { return canceledAt; }
     public void setCanceledAt(LocalDateTime canceledAt) { this.canceledAt = canceledAt; }
+    public String getFailureReasonCode() { return failureReasonCode; }
+    public void setFailureReasonCode(String failureReasonCode) { this.failureReasonCode = failureReasonCode; }
+    public String getFailureMessage() { return failureMessage; }
+    public void setFailureMessage(String failureMessage) { this.failureMessage = failureMessage; }
+    public LocalDateTime getFailedAt() { return failedAt; }
+    public void setFailedAt(LocalDateTime failedAt) { this.failedAt = failedAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

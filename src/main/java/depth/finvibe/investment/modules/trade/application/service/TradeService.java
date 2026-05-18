@@ -305,10 +305,27 @@ public class TradeService {
         row.put("status", order.getOrderStatus());
         row.put("tradeType", legacyTradeType);
         row.put("createdAt", order.getCreatedAt() == null ? null : order.getCreatedAt().toString());
+        row.put("acceptedAt", order.getAcceptedAt() == null ? null : order.getAcceptedAt().toString());
+        row.put("completedAt", order.getCompletedAt() == null ? null : order.getCompletedAt().toString());
+        row.put("canceledAt", order.getCanceledAt() == null ? null : order.getCanceledAt().toString());
+        LocalDateTime failedAt = resolveFailedAt(order);
+        row.put("failedAt", failedAt == null ? null : failedAt.toString());
+        row.put("failureReasonCode", order.getFailureReasonCode());
+        row.put("failureMessage", order.getFailureMessage());
         row.put("autoCondition", order.getAutoCondition());
         row.put("triggerPrice", order.getTriggerPrice() == null ? null : order.getTriggerPrice().doubleValue());
         row.put("kind", order.getAutoCondition() != null || "scheduled".equals(order.getPriceType()) ? "auto" : "manual");
         return row;
+    }
+
+    private LocalDateTime resolveFailedAt(TradeOrderEntity order) {
+        if (order.getFailedAt() != null) {
+            return order.getFailedAt();
+        }
+        if ("failed".equals(order.getOrderStatus())) {
+            return order.getCanceledAt();
+        }
+        return null;
     }
 
     private String newOrderId() {
@@ -675,7 +692,9 @@ public class TradeService {
         order.setOrderStatus("failed");
         order.setRemainingQuantity(order.getQuantity());
         order.setReservedAmountKrw(0L);
-        order.setCanceledAt(LocalDateTime.now());
+        order.setFailureReasonCode(reasonCode);
+        order.setFailureMessage(message);
+        order.setFailedAt(LocalDateTime.now());
         tradeOrderRepository.save(order);
         appendOrderFailedEvent(order, stock, reasonCode, message, reservedAmount);
     }
@@ -691,7 +710,8 @@ public class TradeService {
         payload.put("reasonCode", reasonCode);
         payload.put("message", message);
         payload.put("releasedReservedAmountKrw", releasedReservedAmount);
-        payload.put("failedAt", order.getCanceledAt() == null ? null : order.getCanceledAt().toString());
+        LocalDateTime failedAt = resolveFailedAt(order);
+        payload.put("failedAt", failedAt == null ? null : failedAt.toString());
 
         outboxJdbcRepository.append(
                 "ORDER",
