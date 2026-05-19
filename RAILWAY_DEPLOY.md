@@ -10,7 +10,7 @@ Railway 프로젝트에서 아래 이름으로 서비스를 만듭니다.
 - `kafka`
 - `backend`
 
-`backend`는 GitHub repo `KIM-FINVIBE/Backend`를 연결합니다. 이 repo에는 `railway.json`이 있어서 Railway가 `Dockerfile`로 빌드합니다.
+`backend`는 GitHub repo `mjcapstone1/-KIM-back-`를 연결합니다. 이 repo에는 `railway.json`이 있어서 Railway가 `Dockerfile`로 빌드합니다.
 
 ## 2. Database Services
 
