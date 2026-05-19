@@ -125,6 +125,14 @@ cp .env.example .env
 docker compose up -d --build app
 ```
 
+## Railway 배포
+
+Railway 배포용 설정 파일과 복붙용 환경변수 템플릿을 추가해두었습니다.
+
+- 배포 순서: [RAILWAY_DEPLOY.md](RAILWAY_DEPLOY.md)
+- 백엔드 Variables 템플릿: [deploy/railway.backend.env.example](deploy/railway.backend.env.example)
+- MariaDB/MongoDB/Redis/Kafka 서비스 Variables: [deploy/railway.services.env.md](deploy/railway.services.env.md)
+
 배포 전 최소 점검:
 
 - `JWT_SECRET_KEY`: 32자 이상 랜덤 문자열
