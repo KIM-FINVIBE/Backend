@@ -67,9 +67,12 @@ https://backend-production-xxxx.up.railway.app
 확인 URL:
 
 ```text
+https://backend-production-xxxx.up.railway.app/actuator/health/liveness
 https://backend-production-xxxx.up.railway.app/actuator/health
 https://backend-production-xxxx.up.railway.app/docs
 ```
+
+Railway 배포 healthcheck는 `/actuator/health/liveness`를 사용합니다. `/actuator/health`는 DB, Redis, MongoDB 같은 외부 의존성이 아직 준비되지 않았을 때 503이 날 수 있습니다.
 
 ## 5. Frontend Connection
 

@@ -22,6 +22,7 @@ docker compose up -d --build app
 
 ## 확인
 - Health: `http://localhost:8080/health`
+- Liveness: `http://localhost:8080/actuator/health/liveness`
 - Readiness: `http://localhost:8080/actuator/health/readiness`
 - Swagger: `http://localhost:8080/docs`
 
