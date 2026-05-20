@@ -10,12 +10,17 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 @Component
 public class MongoSeedInitializer {
+    private static final Logger log = LoggerFactory.getLogger(MongoSeedInitializer.class);
+
     private final ThemeNewsRepository themeNewsRepository;
     private final NewsArticleRepository newsArticleRepository;
 
@@ -26,11 +31,23 @@ public class MongoSeedInitializer {
 
     @EventListener(ApplicationReadyEvent.class)
     public void initialize() {
-        if (themeNewsRepository.count() == 0) {
-            seedThemeNews();
-        }
-        if (newsArticleRepository.count() == 0) {
-            seedNewsArticlesFromThemeNews();
+        CompletableFuture.runAsync(this::initializeSafely)
+                .exceptionally(e -> {
+                    log.warn("Mongo seed initialization failed. message={}", e.getMessage(), e);
+                    return null;
+                });
+    }
+
+    private void initializeSafely() {
+        try {
+            if (themeNewsRepository.count() == 0) {
+                seedThemeNews();
+            }
+            if (newsArticleRepository.count() == 0) {
+                seedNewsArticlesFromThemeNews();
+            }
+        } catch (Exception e) {
+            log.warn("Mongo seed initialization skipped. MongoDB may be unavailable. message={}", e.getMessage());
         }
     }
 

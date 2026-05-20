@@ -36,6 +36,14 @@ openssl rand -hex 32
 - `CORS_ALLOWED_ORIGINS`
 - `OPENROUTER_SITE_URL`
 
+MongoDB 서비스 이름이 `mongodb`가 아니면 `mongodb.railway.internal`은 동작하지 않습니다. 서비스 이름을 `mongodb`로 바꾸거나, URI의 host를 실제 서비스 이름에 맞춥니다.
+
+```env
+MONGODB_URI=mongodb://root:<password>@mongodb.railway.internal:27017/finvibe?authSource=admin&serverSelectionTimeoutMS=3000&connectTimeoutMS=3000
+SPRING_MONGODB_URI=mongodb://root:<password>@mongodb.railway.internal:27017/finvibe?authSource=admin&serverSelectionTimeoutMS=3000&connectTimeoutMS=3000
+SPRING_DATA_MONGODB_URI=mongodb://root:<password>@mongodb.railway.internal:27017/finvibe?authSource=admin&serverSelectionTimeoutMS=3000&connectTimeoutMS=3000
+```
+
 `JWT_SECRET_KEY`는 이렇게 만듭니다.
 
 ```bash
