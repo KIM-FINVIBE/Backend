@@ -58,6 +58,10 @@ public class StockQueryService {
         return marketService.getStockSnapshot(toMarketStock(entity), EXCHANGE_RATE);
     }
 
+    public Map<String, Object> liveStockSnapshot(StockEntity entity) {
+        return marketService.getLiveStockSnapshot(toMarketStock(entity), EXCHANGE_RATE);
+    }
+
     public long resolvePriceKrw(StockEntity entity, double price) {
         if ("foreign".equals(Maps.str(toMarketStock(entity), "type"))) {
             return Math.round(price * EXCHANGE_RATE);

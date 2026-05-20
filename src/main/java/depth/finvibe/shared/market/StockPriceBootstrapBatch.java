@@ -132,7 +132,7 @@ public class StockPriceBootstrapBatch {
 
                 processed++;
                 try {
-                    Map<String, Object> snapshot = stockQueryService.stockSnapshot(stock);
+                    Map<String, Object> snapshot = stockQueryService.liveStockSnapshot(stock);
                     String source = String.valueOf(snapshot.getOrDefault("dataSource", "unknown"));
                     double price = toDouble(snapshot.get("price"));
                     double changeRate = toDouble(snapshot.get("changeRate"));

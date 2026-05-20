@@ -116,6 +116,9 @@ finvibe:
   kis:
     enabled: ${KIS_ENABLED:false}
 
+  market:
+    live-kis-on-request: ${FINVIBE_MARKET_LIVE_KIS_ON_REQUEST:false}
+
   naver:
     news:
       enabled: ${NAVER_NEWS_ENABLED:false}

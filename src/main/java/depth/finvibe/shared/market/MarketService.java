@@ -38,6 +38,10 @@ public final class MarketService {
         return kisClient.isEnabled() && "domestic".equals(Maps.str(stock, "type"));
     }
 
+    private boolean shouldUseKisOnRequest(Map<String, Object> stock) {
+        return config.liveKisOnRequest() && shouldUseKis(stock);
+    }
+
     @SuppressWarnings("unchecked")
     public Map<String, Object> quoteToSnapshot(Map<String, Object> stock, Map<String, Object> quote, int exchangeRate) {
         Map<String, Object> snapshot = (Map<String, Object>) Json.deepCopy(stock);
@@ -88,14 +92,10 @@ public final class MarketService {
     public Map<String, Object> getStockSnapshot(Map<String, Object> stock, int exchangeRate) {
         String stockId = Maps.str(stock, "id");
 
-        if (shouldUseKis(stock)) {
-            try {
-                Map<String, Object> quote = kisClient.fetchDomesticQuote(Maps.str(stock, "code"));
-                if (quote != null && Maps.doubleVal(quote, "price") > 0) {
-                    stockPriceStore.saveLiveQuote(stockId, quote);
-                    return quoteToSnapshot(stock, quote, exchangeRate);
-                }
-            } catch (Exception ignored) {
+        if (shouldUseKisOnRequest(stock)) {
+            Map<String, Object> live = fetchLiveStockSnapshot(stock, exchangeRate);
+            if (live != null) {
+                return live;
             }
         }
 
@@ -107,6 +107,31 @@ public final class MarketService {
         }
 
         return metadataOnlySnapshot(stock, exchangeRate);
+    }
+
+    public Map<String, Object> getLiveStockSnapshot(Map<String, Object> stock, int exchangeRate) {
+        Map<String, Object> live = fetchLiveStockSnapshot(stock, exchangeRate);
+        if (live != null) {
+            return live;
+        }
+        return metadataOnlySnapshot(stock, exchangeRate);
+    }
+
+    private Map<String, Object> fetchLiveStockSnapshot(Map<String, Object> stock, int exchangeRate) {
+        if (!shouldUseKis(stock)) {
+            return null;
+        }
+        try {
+            Map<String, Object> quote = kisClient.fetchDomesticQuote(Maps.str(stock, "code"));
+            if (quote != null && Maps.doubleVal(quote, "price") > 0) {
+                stockPriceStore.saveLiveQuote(Maps.str(stock, "id"), quote);
+                return quoteToSnapshot(stock, quote, exchangeRate);
+            }
+        } catch (Exception e) {
+            log.warn("KIS quote fetch failed. stockId={}, code={}, message={}",
+                    Maps.str(stock, "id"), Maps.str(stock, "code"), e.getMessage());
+        }
+        return null;
     }
 
     public Map<String, Object> getSavedStockSnapshot(Map<String, Object> stock, int exchangeRate) {
@@ -146,7 +171,7 @@ public final class MarketService {
                 return stored;
             }
         }
-        if (shouldUseKis(stock)) {
+        if (shouldUseKisOnRequest(stock)) {
             try {
                 List<Map<String, Object>> candles = fetchKisCandles(stock, timeframe, resolvedPoints);
                 if (!candles.isEmpty()) {
@@ -370,7 +395,7 @@ public final class MarketService {
     }
 
     public List<Map<String, Object>> getIndexCandles(String indexCode, String timeframe, int points) {
-        if (!kisClient.isEnabled()) {
+        if (!config.liveKisOnRequest() || !kisClient.isEnabled()) {
             return List.of();
         }
         try {
@@ -424,7 +449,7 @@ public final class MarketService {
     }
 
     public Map<String, Object> getMarketStatus() {
-        if (kisClient.isEnabled()) {
+        if (config.liveKisOnRequest() && kisClient.isEnabled()) {
             try {
                 return kisClient.fetchMarketStatus(LocalDate.now(TimeUtil.SEOUL));
             } catch (Exception ignored) {
@@ -433,7 +458,9 @@ public final class MarketService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("isOpen", Boolean.FALSE);
         result.put("session", "CLOSED");
-        result.put("message", "KIS 설정이 없어서 실제 장 상태를 확인할 수 없습니다.");
+        result.put("message", kisClient.isEnabled()
+                ? "요청 중 KIS 직접 조회가 꺼져 있어 저장된 장 상태만 사용합니다."
+                : "KIS 설정이 없어서 실제 장 상태를 확인할 수 없습니다.");
         result.put("checkedAt", TimeUtil.nowSeoulIso());
         result.put("serverTime", TimeUtil.nowSeoulIso());
         result.put("dataSource", "unavailable");

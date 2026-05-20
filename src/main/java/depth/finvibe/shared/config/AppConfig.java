@@ -49,6 +49,9 @@ public class AppConfig {
     @Value("${finvibe.kis.timeout-ms:5000}")
     private int kisTimeoutMs;
 
+    @Value("${finvibe.market.live-kis-on-request:false}")
+    private boolean liveKisOnRequest;
+
     @Value("${finvibe.naver.news.enabled:false}")
     private boolean naverNewsEnabled;
 
@@ -140,6 +143,10 @@ public class AppConfig {
 
     public int kisTimeoutMs() {
         return kisTimeoutMs;
+    }
+
+    public boolean liveKisOnRequest() {
+        return liveKisOnRequest;
     }
 
     public boolean naverNewsEnabled() {

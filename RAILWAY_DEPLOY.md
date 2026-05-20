@@ -46,6 +46,7 @@ openssl rand -hex 64
 
 ```env
 KIS_ENABLED=false
+FINVIBE_MARKET_LIVE_KIS_ON_REQUEST=false
 NAVER_NEWS_ENABLED=false
 OPENROUTER_ENABLED=false
 FINVIBE_MARKET_BOOTSTRAP_PRICES_RUN_ON_STARTUP=false
@@ -53,6 +54,8 @@ FINVIBE_MARKET_CANDLE_BACKFILL_RUN_ON_STARTUP=false
 ```
 
 백엔드가 정상 기동한 뒤 하나씩 `true`로 켜는 편이 장애 원인을 찾기 쉽습니다.
+
+`FINVIBE_MARKET_LIVE_KIS_ON_REQUEST=false`는 프론트 요청마다 KIS를 직접 호출하지 않고 DB에 저장된 가격/차트만 응답하게 합니다. KIS 수집은 배치가 천천히 채우도록 두는 것이 Railway에서 더 안전합니다.
 
 ## 4. Public Domain
 
