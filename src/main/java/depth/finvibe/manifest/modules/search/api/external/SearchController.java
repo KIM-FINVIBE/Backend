@@ -8,6 +8,9 @@ import depth.finvibe.shared.security.AuthService;
 import depth.finvibe.shared.security.CurrentUser;
 import depth.finvibe.shared.state.AppState;
 import depth.finvibe.shared.util.Maps;
+import java.util.concurrent.CompletableFuture;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -15,6 +18,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 public class SearchController {
+    private static final Logger log = LoggerFactory.getLogger(SearchController.class);
+
     private final AppState state;
     private final RedisJsonCacheService cache;
     private final AuthService authService;
@@ -71,7 +76,13 @@ public class SearchController {
         doc.setUserId(optionalUserId(authorization));
         doc.setQuery(query);
         doc.setSource(source);
-        searchLogRepository.save(doc);
+        CompletableFuture.runAsync(() -> {
+            try {
+                searchLogRepository.save(doc);
+            } catch (Exception e) {
+                log.warn("Search log save skipped. source={}, message={}", source, e.getMessage());
+            }
+        });
     }
 
     private String optionalUserId(String authorization) {

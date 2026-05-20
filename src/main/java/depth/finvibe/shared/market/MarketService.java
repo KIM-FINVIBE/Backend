@@ -208,7 +208,7 @@ public final class MarketService {
                 return aggregateCandles(storedCandles, timeframe, resolvedPoints, stockId);
             }
         }
-        return fallbackEstimatedCandles(stock, timeframe, resolvedPoints);
+        return List.of();
     }
 
     public List<Map<String, Object>> refreshStoredCandles(Map<String, Object> stock, String timeframe, int points) {
@@ -272,107 +272,6 @@ public final class MarketService {
             log.warn("KIS candle aggregation fallback failed. stockId={}, code={}, timeframe={}, points={}",
                     Maps.str(stock, "id"), Maps.str(stock, "code"), timeframe, points, e);
             return List.of();
-        }
-    }
-
-    private List<Map<String, Object>> fallbackEstimatedCandles(Map<String, Object> stock, String timeframe, int points) {
-        double basePrice = resolveFallbackBasePrice(stock);
-        if (basePrice <= 0) {
-            return List.of();
-        }
-
-        String stockId = Maps.str(stock, "id");
-        String stockType = Maps.str(stock, "type", "domestic");
-        long baseVolume = resolveFallbackBaseVolume(stock);
-        List<Map<String, Object>> generated = FinvibeUtils.generateStockCandles(
-                Maps.str(stock, "code", stockId),
-                stockType,
-                basePrice,
-                timeframe,
-                points
-        );
-
-        List<Map<String, Object>> rows = new ArrayList<>();
-        double previousClose = 0.0;
-        for (int index = 0; index < generated.size(); index++) {
-            Map<String, Object> candle = generated.get(index);
-            double close = Maps.doubleVal(candle, "close");
-            long volume = fallbackVolume(baseVolume, index, generated.size());
-            long value = volume <= 0 ? 0L : Math.round(close * volume);
-
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("stockId", stockId);
-            row.put("timeframe", timeframe.toUpperCase());
-            row.put("at", fallbackCandleAt(timeframe, generated.size(), index).toString());
-            row.put("open", Maps.doubleVal(candle, "open"));
-            row.put("high", Maps.doubleVal(candle, "high"));
-            row.put("low", Maps.doubleVal(candle, "low"));
-            row.put("close", close);
-            row.put("volume", volume);
-            row.put("value", value);
-            row.put("prevDayChangePct", previousClose <= 0 ? 0.0 : Math.round(((close - previousClose) / previousClose) * 10_000.0) / 100.0);
-            row.put("dataSource", "estimated");
-            rows.add(row);
-            previousClose = close;
-        }
-        return rows;
-    }
-
-    private double resolveFallbackBasePrice(Map<String, Object> stock) {
-        double basePrice = Maps.doubleVal(stock, "price", Maps.doubleVal(stock, "close"));
-        if (basePrice > 0) {
-            return basePrice;
-        }
-        Map<String, Object> saved = stockPriceStore.loadLastSavedQuote(Maps.str(stock, "id"));
-        if (saved == null) {
-            return 0.0;
-        }
-        return Maps.doubleVal(saved, "price");
-    }
-
-    private long resolveFallbackBaseVolume(Map<String, Object> stock) {
-        long baseVolume = Math.max(0L, Maps.longVal(stock.get("volume"), 0L));
-        if (baseVolume > 0) {
-            return baseVolume;
-        }
-        Map<String, Object> saved = stockPriceStore.loadLastSavedQuote(Maps.str(stock, "id"));
-        if (saved == null) {
-            return 0L;
-        }
-        return Math.max(0L, Maps.longVal(saved.get("volume"), 0L));
-    }
-
-    private long fallbackVolume(long baseVolume, int index, int count) {
-        if (baseVolume <= 0) {
-            return 0L;
-        }
-        double wave = 0.88 + (Math.floorMod(index * 17 + count, 25) / 100.0);
-        return Math.max(1L, Math.round(baseVolume * wave));
-    }
-
-    private ZonedDateTime fallbackCandleAt(String timeframe, int count, int index) {
-        ZonedDateTime now = TimeUtil.nowSeoul();
-        long distance = Math.max(0L, count - index);
-        if (timeframe.endsWith("min")) {
-            return now.minusMinutes(distance * parseMinuteStep(timeframe));
-        }
-        return switch (timeframe) {
-            case "week" -> now.minusWeeks(distance);
-            case "month" -> now.minusMonths(distance);
-            case "year" -> now.minusYears(distance);
-            default -> now.minusDays(distance);
-        };
-    }
-
-    private int parseMinuteStep(String timeframe) {
-        String digits = timeframe == null ? "" : timeframe.replaceAll("\\D", "");
-        if (digits.isBlank()) {
-            return 1;
-        }
-        try {
-            return Math.max(1, Integer.parseInt(digits));
-        } catch (NumberFormatException ignored) {
-            return 1;
         }
     }
 
