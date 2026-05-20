@@ -41,6 +41,8 @@ finvibe:
     app-key: ${KIS_APP_KEY:}
     app-secret: ${KIS_APP_SECRET:}
     timeout-ms: ${KIS_TIMEOUT_MS:5000}
+    token-min-reissue-seconds: ${KIS_TOKEN_MIN_REISSUE_SECONDS:86400}
+    token-failure-cooldown-seconds: ${KIS_TOKEN_FAILURE_COOLDOWN_SECONDS:3600}
   naver:
     news:
       enabled: ${NAVER_NEWS_ENABLED:false}

@@ -16,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.DayOfWeek;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
@@ -38,6 +39,9 @@ public final class KisClient {
 
     private String accessToken;
     private long accessTokenExpiresAtEpochSeconds;
+    private long accessTokenIssuedAtEpochSeconds;
+    private long lastTokenIssueAttemptAtEpochSeconds;
+    private long lastTokenIssueFailureAtEpochSeconds;
     private final Map<String, CacheEntry> quoteCache = new LinkedHashMap<>();
     private final Map<String, CacheEntry> chartCache = new LinkedHashMap<>();
     private final Map<String, CacheEntry> holidayCache = new LinkedHashMap<>();
@@ -434,15 +438,8 @@ public final class KisClient {
             if (!"0".equals(rtCd)) {
                 String msgCd = Maps.str(payload, "msg_cd", "UNKNOWN");
                 String msg1 = Maps.str(payload, "msg1", "KIS API error");
-                if ("EGW00123".equals(msgCd)) {
-                    synchronized (lock) {
-                        accessToken = null;
-                        accessTokenExpiresAtEpochSeconds = 0;
-                        try {
-                            Files.deleteIfExists(tokenFile);
-                        } catch (Exception ignored) {
-                        }
-                    }
+                if (isInvalidTokenMessage(msgCd)) {
+                    markAccessTokenRejected();
                 }
                 throw new RuntimeException("KIS API error rt_cd=" + rtCd + " msg_cd=" + msgCd + " msg1=" + msg1);
             }
@@ -466,11 +463,16 @@ public final class KisClient {
                 return accessToken;
             }
 
+            enforceTokenIssueGuardLocked(now);
+
             try {
                 Map<String, Object> body = new LinkedHashMap<>();
                 body.put("grant_type", "client_credentials");
                 body.put("appkey", config.kisAppKey());
                 body.put("appsecret", config.kisAppSecret());
+
+                lastTokenIssueAttemptAtEpochSeconds = now;
+                persistTokenLocked();
 
                 HttpRequest request = HttpRequest.newBuilder(URI.create(config.kisBaseUrl() + "/oauth2/tokenP"))
                         .timeout(Duration.ofMillis(config.kisTimeoutMs()))
@@ -479,23 +481,29 @@ public final class KisClient {
                         .build();
                 HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
                 if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                    markTokenIssueFailureLocked(now);
                     throw new RuntimeException("KIS token HTTP error: " + response.statusCode() + " body=" + response.body());
                 }
                 Map<String, Object> payload = Json.parseObject(response.body());
                 String token = Maps.str(payload, "access_token");
                 long expiresIn = Maps.longVal(payload.get("expires_in"), 24L * 60L * 60L);
                 if (token == null || token.isBlank()) {
+                    markTokenIssueFailureLocked(now);
                     throw new RuntimeException("KIS access token missing");
                 }
 
                 accessToken = token;
-                accessTokenExpiresAtEpochSeconds = System.currentTimeMillis() / 1000L + expiresIn;
+                accessTokenIssuedAtEpochSeconds = now;
+                accessTokenExpiresAtEpochSeconds = now + expiresIn;
+                lastTokenIssueFailureAtEpochSeconds = 0;
                 persistTokenLocked();
                 return accessToken;
             } catch (IOException e) {
+                markTokenIssueFailureLocked(now);
                 throw new RuntimeException("KIS token request failed", e);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                markTokenIssueFailureLocked(now);
                 throw new RuntimeException("KIS token request failed", e);
             }
         }
@@ -515,6 +523,18 @@ public final class KisClient {
             Map<String, Object> payload = Json.parseObject(Files.readString(tokenFile, StandardCharsets.UTF_8));
             String token = Maps.str(payload, "accessToken");
             long expiresAt = Maps.longVal(payload.get("expiresAtEpochSeconds"), 0L);
+            accessTokenIssuedAtEpochSeconds = Math.max(
+                    accessTokenIssuedAtEpochSeconds,
+                    Maps.longVal(payload.get("issuedAtEpochSeconds"), 0L)
+            );
+            lastTokenIssueAttemptAtEpochSeconds = Math.max(
+                    lastTokenIssueAttemptAtEpochSeconds,
+                    Maps.longVal(payload.get("lastIssueAttemptAtEpochSeconds"), 0L)
+            );
+            lastTokenIssueFailureAtEpochSeconds = Math.max(
+                    lastTokenIssueFailureAtEpochSeconds,
+                    Maps.longVal(payload.get("lastIssueFailureAtEpochSeconds"), 0L)
+            );
             long now = System.currentTimeMillis() / 1000L;
             if (token != null && !token.isBlank() && now < (expiresAt - TOKEN_BUFFER_SECONDS)) {
                 accessToken = token;
@@ -530,9 +550,58 @@ public final class KisClient {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("accessToken", accessToken);
             payload.put("expiresAtEpochSeconds", accessTokenExpiresAtEpochSeconds);
+            payload.put("issuedAtEpochSeconds", accessTokenIssuedAtEpochSeconds);
+            payload.put("lastIssueAttemptAtEpochSeconds", lastTokenIssueAttemptAtEpochSeconds);
+            payload.put("lastIssueFailureAtEpochSeconds", lastTokenIssueFailureAtEpochSeconds);
             Files.writeString(tokenFile, Json.stringify(payload), StandardCharsets.UTF_8);
         } catch (Exception ignored) {
         }
+    }
+
+    private void enforceTokenIssueGuardLocked(long now) {
+        if (lastTokenIssueFailureAtEpochSeconds > 0) {
+            long retryAt = lastTokenIssueFailureAtEpochSeconds + config.kisTokenFailureCooldownSeconds();
+            if (now < retryAt) {
+                throw new RuntimeException("KIS token issue is cooling down until " + formatEpochSeconds(retryAt));
+            }
+        }
+        if (accessTokenIssuedAtEpochSeconds > 0) {
+            long retryAt = accessTokenIssuedAtEpochSeconds + config.kisTokenMinReissueSeconds();
+            if (now < retryAt) {
+                throw new RuntimeException("KIS token was already issued recently; reissue blocked until " + formatEpochSeconds(retryAt));
+            }
+        }
+    }
+
+    private void markAccessTokenRejected() {
+        synchronized (lock) {
+            long now = System.currentTimeMillis() / 1000L;
+            loadPersistedTokenLocked();
+            accessToken = null;
+            accessTokenExpiresAtEpochSeconds = 0;
+            if (accessTokenIssuedAtEpochSeconds <= 0) {
+                accessTokenIssuedAtEpochSeconds = now;
+            }
+            lastTokenIssueFailureAtEpochSeconds = now;
+            persistTokenLocked();
+        }
+    }
+
+    private void markTokenIssueFailureLocked(long attemptedAt) {
+        lastTokenIssueAttemptAtEpochSeconds = Math.max(lastTokenIssueAttemptAtEpochSeconds, attemptedAt);
+        lastTokenIssueFailureAtEpochSeconds = System.currentTimeMillis() / 1000L;
+        persistTokenLocked();
+    }
+
+    private boolean isInvalidTokenMessage(String msgCd) {
+        return switch (msgCd) {
+            case "EGW00113", "EGW00121", "EGW00123" -> true;
+            default -> false;
+        };
+    }
+
+    private String formatEpochSeconds(long epochSeconds) {
+        return TimeUtil.ISO.format(ZonedDateTime.ofInstant(Instant.ofEpochSecond(epochSeconds), TimeUtil.SEOUL));
     }
 
     private String buildUrl(String path, Map<String, String> queryParams) {

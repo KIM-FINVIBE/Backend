@@ -49,6 +49,12 @@ public class AppConfig {
     @Value("${finvibe.kis.timeout-ms:5000}")
     private int kisTimeoutMs;
 
+    @Value("${finvibe.kis.token-min-reissue-seconds:86400}")
+    private long kisTokenMinReissueSeconds;
+
+    @Value("${finvibe.kis.token-failure-cooldown-seconds:3600}")
+    private long kisTokenFailureCooldownSeconds;
+
     @Value("${finvibe.market.live-kis-on-request:false}")
     private boolean liveKisOnRequest;
 
@@ -143,6 +149,14 @@ public class AppConfig {
 
     public int kisTimeoutMs() {
         return kisTimeoutMs;
+    }
+
+    public long kisTokenMinReissueSeconds() {
+        return Math.max(60L, kisTokenMinReissueSeconds);
+    }
+
+    public long kisTokenFailureCooldownSeconds() {
+        return Math.max(60L, kisTokenFailureCooldownSeconds);
     }
 
     public boolean liveKisOnRequest() {
