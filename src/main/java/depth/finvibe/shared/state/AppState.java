@@ -159,6 +159,14 @@ public final class AppState {
     public List<Map<String, Object>> getIndices() {
         List<Map<String, Object>> rows = new ArrayList<>();
         for (Map<String, Object> item : indicesSeed) {
+            String indexCode = domesticIndexCode(Maps.str(item, "name"));
+            if (indexCode != null) {
+                Map<String, Object> stored = marketService.getStoredIndexSnapshot(item, indexCode);
+                if (stored != null) {
+                    rows.add(stored);
+                    continue;
+                }
+            }
             rows.add(FinvibeUtils.applyLiveIndex(item));
         }
         return rows;

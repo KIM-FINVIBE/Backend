@@ -395,14 +395,120 @@ public final class MarketService {
     }
 
     public List<Map<String, Object>> getIndexCandles(String indexCode, String timeframe, int points) {
+        int resolvedPoints = Math.max(1, points);
+        String normalizedTimeframe = normalizeStoredTimeframe(timeframe);
+
+        if (isStoredCandleTimeframe(normalizedTimeframe)) {
+            List<Map<String, Object>> stored = stockPriceStore.loadIndexCandles(indexCode, normalizedTimeframe, resolvedPoints);
+            if (stored.size() >= Math.min(resolvedPoints, 5)) {
+                return stored;
+            }
+            if (!"day".equals(normalizedTimeframe)) {
+                List<Map<String, Object>> aggregated = aggregateStoredIndexCandles(indexCode, normalizedTimeframe, resolvedPoints);
+                if (!aggregated.isEmpty()) {
+                    return aggregated;
+                }
+            }
+        }
+
         if (!config.liveKisOnRequest() || !kisClient.isEnabled()) {
-            return List.of();
+            return stockPriceStore.loadIndexCandles(indexCode, normalizedTimeframe, resolvedPoints);
         }
+
         try {
-            return kisClient.fetchDomesticIndexDailyChart(indexCode, timeframe, points);
-        } catch (Exception ignored) {
+            List<Map<String, Object>> candles = refreshStoredIndexCandles(indexCode, domesticIndexName(indexCode), normalizedTimeframe, resolvedPoints);
+            if (!candles.isEmpty()) {
+                return candles;
+            }
+        } catch (Exception e) {
+            log.warn("KIS index candle fetch failed. indexCode={}, timeframe={}, points={}",
+                    indexCode, normalizedTimeframe, resolvedPoints, e);
+        }
+
+        List<Map<String, Object>> stored = stockPriceStore.loadIndexCandles(indexCode, normalizedTimeframe, resolvedPoints);
+        if (!stored.isEmpty()) {
+            return stored;
+        }
+        return "day".equals(normalizedTimeframe)
+                ? List.of()
+                : aggregateStoredIndexCandles(indexCode, normalizedTimeframe, resolvedPoints);
+    }
+
+    public List<Map<String, Object>> refreshStoredIndexCandles(String indexCode, String indexName, String timeframe, int points) {
+        String normalizedTimeframe = normalizeStoredTimeframe(timeframe);
+        if (!kisClient.isEnabled() || !isStoredCandleTimeframe(normalizedTimeframe)) {
             return List.of();
         }
+        List<Map<String, Object>> candles = kisClient.fetchDomesticIndexDailyChart(indexCode, normalizedTimeframe, Math.max(1, points));
+        if (!candles.isEmpty()) {
+            stockPriceStore.saveIndexCandles(indexCode, indexName, normalizedTimeframe, candles, "kis");
+        }
+        return candles;
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getStoredIndexSnapshot(Map<String, Object> seed, String indexCode) {
+        List<Map<String, Object>> candles = stockPriceStore.loadIndexCandles(indexCode, "day", 2);
+        if (candles.isEmpty()) {
+            return null;
+        }
+        Map<String, Object> latest = candles.get(candles.size() - 1);
+        Map<String, Object> previous = candles.size() >= 2 ? candles.get(candles.size() - 2) : latest;
+        double currentValue = Maps.doubleVal(latest, "close");
+        double previousValue = Maps.doubleVal(previous, "close", currentValue);
+        if (currentValue <= 0) {
+            return null;
+        }
+        double change = currentValue - previousValue;
+        double percent = previousValue == 0 ? 0.0 : (change / previousValue) * 100.0;
+        Map<String, Object> snapshot = (Map<String, Object>) Json.deepCopy(seed);
+        snapshot.put("value", roundIndexValue(currentValue));
+        snapshot.put("baseValue", roundIndexValue(previousValue));
+        snapshot.put("change", roundIndexValue(change));
+        snapshot.put("percent", Math.round(percent * 100.0) / 100.0);
+        snapshot.put("isUp", change >= 0);
+        snapshot.put("dataSource", latest.getOrDefault("dataSource", "index_candles"));
+        snapshot.put("fetchedAt", latest.getOrDefault("at", TimeUtil.nowSeoulIso()));
+        return snapshot;
+    }
+
+    private List<Map<String, Object>> aggregateStoredIndexCandles(String indexCode, String timeframe, int points) {
+        int sourcePoints = switch (timeframe) {
+            case "week" -> Math.max(points * 7, 90);
+            case "month" -> Math.max(points * 31, 365);
+            case "year" -> Math.max(points * 252, 365 * 5);
+            default -> points;
+        };
+        List<Map<String, Object>> dayCandles = stockPriceStore.loadIndexCandles(indexCode, "day", sourcePoints);
+        if (dayCandles.isEmpty()) {
+            return List.of();
+        }
+        return aggregateCandles(dayCandles, timeframe, points, "INDEX:" + indexCode);
+    }
+
+    private String normalizeStoredTimeframe(String timeframe) {
+        if (timeframe == null || timeframe.isBlank()) {
+            return "day";
+        }
+        return switch (timeframe.trim().toLowerCase()) {
+            case "day", "daily" -> "day";
+            case "week", "weekly" -> "week";
+            case "month", "monthly" -> "month";
+            case "year", "yearly" -> "year";
+            default -> timeframe.trim().toLowerCase();
+        };
+    }
+
+    private String domesticIndexName(String indexCode) {
+        return switch (indexCode) {
+            case "0001" -> "코스피종합";
+            case "1001" -> "코스닥";
+            default -> indexCode;
+        };
+    }
+
+    private double roundIndexValue(double value) {
+        return Math.round(value * 100.0) / 100.0;
     }
 
     public Map<String, Object> getOrderBook(Map<String, Object> stock, int exchangeRate) {

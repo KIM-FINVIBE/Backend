@@ -2,6 +2,8 @@ package depth.finvibe.shared.market;
 
 import depth.finvibe.shared.persistence.market.ClosingPriceEntity;
 import depth.finvibe.shared.persistence.market.ClosingPriceRepository;
+import depth.finvibe.shared.persistence.market.MarketIndexCandleEntity;
+import depth.finvibe.shared.persistence.market.MarketIndexCandleRepository;
 import depth.finvibe.shared.persistence.market.PriceCandleEntity;
 import depth.finvibe.shared.persistence.market.PriceCandleRepository;
 import depth.finvibe.shared.persistence.market.StockEntity;
@@ -29,17 +31,20 @@ public class StockPriceStore {
     private final StockRepository stockRepository;
     private final ClosingPriceRepository closingPriceRepository;
     private final PriceCandleRepository priceCandleRepository;
+    private final MarketIndexCandleRepository marketIndexCandleRepository;
     private final RedisJsonCacheService cache;
 
     public StockPriceStore(
             StockRepository stockRepository,
             ClosingPriceRepository closingPriceRepository,
             PriceCandleRepository priceCandleRepository,
+            MarketIndexCandleRepository marketIndexCandleRepository,
             RedisJsonCacheService cache
     ) {
         this.stockRepository = stockRepository;
         this.closingPriceRepository = closingPriceRepository;
         this.priceCandleRepository = priceCandleRepository;
+        this.marketIndexCandleRepository = marketIndexCandleRepository;
         this.cache = cache;
     }
 
@@ -154,6 +159,75 @@ public class StockPriceStore {
         return rows;
     }
 
+    @Transactional
+    public void saveIndexCandles(String indexCode, String indexName, String timeframe, List<Map<String, Object>> candles, String source) {
+        if (indexCode == null || indexCode.isBlank() || candles == null || candles.isEmpty()) {
+            return;
+        }
+        String storedTimeframe = storedTimeframe(timeframe);
+        String resolvedName = indexName == null || indexName.isBlank() ? indexCode : indexName;
+        for (Map<String, Object> candle : candles) {
+            LocalDateTime candleAt = parseCandleAt(candle.get("at"));
+            double close = Maps.doubleVal(candle, "close");
+            if (candleAt == null || close <= 0) {
+                continue;
+            }
+            double open = Maps.doubleVal(candle, "open", close);
+            double high = Maps.doubleVal(candle, "high", Math.max(open, close));
+            double low = Maps.doubleVal(candle, "low", Math.min(open, close));
+            long volume = Maps.longVal(candle.get("volume"), 0L);
+            long value = Maps.longVal(candle.get("value"), 0L);
+
+            MarketIndexCandleEntity entity = marketIndexCandleRepository
+                    .findByIndexCodeAndTimeframeAndCandleAt(indexCode, storedTimeframe, candleAt)
+                    .orElseGet(MarketIndexCandleEntity::new);
+            entity.setIndexCode(indexCode);
+            entity.setIndexName(resolvedName);
+            entity.setTimeframe(storedTimeframe);
+            entity.setCandleAt(candleAt);
+            entity.setOpenPrice(BigDecimal.valueOf(open));
+            entity.setHighPrice(BigDecimal.valueOf(high));
+            entity.setLowPrice(BigDecimal.valueOf(low));
+            entity.setClosePrice(BigDecimal.valueOf(close));
+            entity.setVolume(volume);
+            entity.setTradingValueKrw(value);
+            entity.setSource(source == null || source.isBlank() ? "kis" : source);
+            marketIndexCandleRepository.save(entity);
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> loadIndexCandles(String indexCode, String timeframe, int points) {
+        if (indexCode == null || indexCode.isBlank()) {
+            return List.of();
+        }
+        String storedTimeframe = storedTimeframe(timeframe);
+        List<MarketIndexCandleEntity> candles = marketIndexCandleRepository.findByIndexCodeAndTimeframeOrderByCandleAtAsc(
+                indexCode,
+                storedTimeframe
+        );
+        if (candles.isEmpty()) {
+            return List.of();
+        }
+
+        int resolvedPoints = Math.max(1, points);
+        int fromIndex = Math.max(0, candles.size() - resolvedPoints);
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (MarketIndexCandleEntity candle : candles.subList(fromIndex, candles.size())) {
+            rows.add(toIndexCandleRow(candle));
+        }
+        return rows;
+    }
+
+    @Transactional(readOnly = true)
+    public boolean needsIndexCandleBackfill(String indexCode, String timeframe, int minimumPoints) {
+        if (indexCode == null || indexCode.isBlank()) {
+            return false;
+        }
+        String storedTimeframe = storedTimeframe(timeframe);
+        return marketIndexCandleRepository.countByIndexCodeAndTimeframe(indexCode, storedTimeframe) < Math.max(1, minimumPoints);
+    }
+
     @Transactional(readOnly = true)
     public boolean needsCandleBackfill(String stockId, String timeframe, int minimumPoints) {
         if (stockId == null || stockId.isBlank()) {
@@ -216,6 +290,22 @@ public class StockPriceStore {
         row.put("volume", candle.getVolume());
         row.put("value", candle.getTradingValueKrw());
         row.put("prevDayChangePct", 0.0);
+        row.put("dataSource", candle.getSource());
+        return row;
+    }
+
+    private Map<String, Object> toIndexCandleRow(MarketIndexCandleEntity candle) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("indexCode", candle.getIndexCode());
+        row.put("indexName", candle.getIndexName());
+        row.put("timeframe", candle.getTimeframe());
+        row.put("at", candle.getCandleAt().atZone(TimeUtil.SEOUL).toString());
+        row.put("open", candle.getOpenPrice().doubleValue());
+        row.put("high", candle.getHighPrice().doubleValue());
+        row.put("low", candle.getLowPrice().doubleValue());
+        row.put("close", candle.getClosePrice().doubleValue());
+        row.put("volume", candle.getVolume());
+        row.put("value", candle.getTradingValueKrw());
         row.put("dataSource", candle.getSource());
         return row;
     }
