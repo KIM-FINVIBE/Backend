@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -170,10 +171,55 @@ public final class AppState {
     public List<Map<String, Object>> getIndexChart(String indexName, String timeframe, int points) {
         Map<String, Object> index = resolveIndex(indexName);
         String indexCode = domesticIndexCode(Maps.str(index, "name"));
-        if (indexCode == null) {
-            return List.of();
+        if (indexCode != null) {
+            List<Map<String, Object>> liveCandles = marketService.getIndexCandles(indexCode, timeframe, points);
+            if (!liveCandles.isEmpty()) {
+                return liveCandles;
+            }
         }
-        return marketService.getIndexCandles(indexCode, timeframe, points);
+        return fallbackIndexCandles(index, timeframe, points);
+    }
+
+    private List<Map<String, Object>> fallbackIndexCandles(Map<String, Object> index, String timeframe, int points) {
+        String indexName = Maps.str(index, "name");
+        double baseValue = Maps.doubleVal(index, "value", Maps.doubleVal(index, "baseValue", 2500.0));
+        List<Map<String, Object>> generated = FinvibeUtils.generateIndexChart(indexName, baseValue, points);
+        List<Map<String, Object>> rows = new ArrayList<>();
+        double previousClose = 0.0;
+        for (int i = 0; i < generated.size(); i++) {
+            Map<String, Object> point = generated.get(i);
+            double close = Maps.doubleVal(point, "value", baseValue);
+            double open = previousClose <= 0.0 ? close : previousClose;
+            double high = Math.max(open, close);
+            double low = Math.min(open, close);
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("time", Maps.str(point, "time"));
+            row.put("value", close);
+            row.put("at", indexCandleAt(timeframe, generated.size(), i).toString());
+            row.put("open", open);
+            row.put("high", high);
+            row.put("low", low);
+            row.put("close", close);
+            row.put("volume", 0L);
+            row.put("dataSource", "seed");
+            rows.add(row);
+            previousClose = close;
+        }
+        return rows;
+    }
+
+    private ZonedDateTime indexCandleAt(String timeframe, int count, int index) {
+        ZonedDateTime now = TimeUtil.nowSeoul();
+        long remaining = Math.max(0, count - index - 1L);
+        String value = timeframe == null ? "day" : timeframe.toLowerCase();
+        return switch (value) {
+            case "1min" -> now.minusMinutes(remaining);
+            case "60min" -> now.minusHours(remaining);
+            case "week" -> now.minusWeeks(remaining);
+            case "month" -> now.minusMonths(remaining);
+            case "year" -> now.minusYears(remaining);
+            default -> now.minusDays(remaining);
+        };
     }
 
     private Map<String, Object> resolveIndex(String indexName) {
