@@ -128,19 +128,27 @@ public class ThemeController {
 
     private List<Map<String, Object>> themeNewsItems(String themeId) {
         List<Map<String, Object>> rows = new ArrayList<>();
-        for (ThemeNewsDocument doc : themeNewsRepository.findByThemeIdOrderByPublishedAtDesc(themeId)) {
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("id", doc.getId());
-            row.put("themeId", doc.getThemeId());
-            row.put("themeName", doc.getThemeName());
-            row.put("symbol", doc.getSymbol());
-            row.put("publisher", doc.getPublisher());
-            row.put("timeAgo", doc.getTimeAgo());
-            row.put("title", doc.getTitle());
-            row.put("summary", doc.getSummary());
-            row.put("url", doc.getUrl());
-            row.put("publishedAt", doc.getPublishedAt() == null ? null : doc.getPublishedAt().toString());
-            rows.add(row);
+        try {
+            for (ThemeNewsDocument doc : themeNewsRepository.findByThemeIdOrderByPublishedAtDesc(themeId)) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("id", doc.getId());
+                row.put("themeId", doc.getThemeId());
+                row.put("themeName", doc.getThemeName());
+                row.put("symbol", doc.getSymbol());
+                row.put("publisher", doc.getPublisher());
+                row.put("timeAgo", doc.getTimeAgo());
+                row.put("title", doc.getTitle());
+                row.put("summary", doc.getSummary());
+                row.put("url", doc.getUrl());
+                row.put("publishedAt", doc.getPublishedAt() == null ? null : doc.getPublishedAt().toString());
+                rows.add(row);
+            }
+        } catch (Exception ignored) {
+            // MongoDB is optional for this read path; seed data keeps the home/theme UI available.
+            rows.clear();
+        }
+        if (rows.isEmpty()) {
+            rows.addAll(state.getThemeNews(themeId));
         }
         return rows;
     }
