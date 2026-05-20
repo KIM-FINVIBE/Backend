@@ -5,6 +5,7 @@ import depth.finvibe.shared.persistence.market.StockRepository;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
@@ -54,6 +55,9 @@ public class StockCandleBackfillBatch {
     @Value("${finvibe.market.candle-backfill.request-delay-ms:300}")
     private long requestDelayMs;
 
+    @Value("${finvibe.market.candle-backfill.startup-delay-ms:20000}")
+    private long startupDelayMs;
+
     public StockCandleBackfillBatch(
             StockRepository stockRepository,
             StockQueryService stockQueryService,
@@ -71,7 +75,13 @@ public class StockCandleBackfillBatch {
         if (!enabled || !runOnStartup || !startupExecuted.compareAndSet(false, true)) {
             return;
         }
-        backfillDailyCandles("startup");
+        CompletableFuture.runAsync(() -> {
+            sleepBeforeStartup("candle-backfill");
+            backfillDailyCandles("startup");
+        }).exceptionally(e -> {
+            log.warn("일봉 백필 시작 작업 실패 message={}", e.getMessage(), e);
+            return null;
+        });
     }
 
     @Scheduled(cron = "${finvibe.market.candle-backfill.cron:0 3/5 * * * *}", zone = "Asia/Seoul")
@@ -160,5 +170,17 @@ public class StockCandleBackfillBatch {
                 pageable
         );
         return Math.max(0, firstPage.getTotalPages());
+    }
+
+    private void sleepBeforeStartup(String jobName) {
+        if (startupDelayMs <= 0) {
+            return;
+        }
+        try {
+            log.info("{} startup 작업을 {}ms 뒤에 시작합니다.", jobName, startupDelayMs);
+            Thread.sleep(startupDelayMs);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }

@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
@@ -55,6 +56,9 @@ public class StockPriceBootstrapBatch {
     @Value("${finvibe.market.bootstrap-prices.stale-after-minutes:180}")
     private long staleAfterMinutes;
 
+    @Value("${finvibe.market.bootstrap-prices.startup-delay-ms:10000}")
+    private long startupDelayMs;
+
     public StockPriceBootstrapBatch(
             StockRepository stockRepository,
             StockQueryService stockQueryService,
@@ -70,7 +74,13 @@ public class StockPriceBootstrapBatch {
         if (!enabled || !runOnStartup || !startupExecuted.compareAndSet(false, true)) {
             return;
         }
-        bootstrapActiveDomesticPrices("startup");
+        CompletableFuture.runAsync(() -> {
+            sleepBeforeStartup("bootstrap-prices");
+            bootstrapActiveDomesticPrices("startup");
+        }).exceptionally(e -> {
+            log.warn("KRX 가격 초기화 시작 작업 실패 message={}", e.getMessage(), e);
+            return null;
+        });
     }
 
     @Scheduled(cron = "${finvibe.market.bootstrap-prices.cron:0 0/10 * * * *}", zone = "Asia/Seoul")
@@ -154,6 +164,18 @@ public class StockPriceBootstrapBatch {
 
         log.info("KRX 가격 초기화 완료 trigger={}, startPage={}, pageWindow={}, totalPages={}, processed={}, updated={}, skipped={}, failed={}, refreshZeroOnly={}, staleAfterMinutes={}",
                 trigger, startPage, pageWindow, totalPages, processed, updated, skipped, failed, refreshZeroOnly, staleAfterMinutes);
+    }
+
+    private void sleepBeforeStartup(String jobName) {
+        if (startupDelayMs <= 0) {
+            return;
+        }
+        try {
+            log.info("{} startup 작업을 {}ms 뒤에 시작합니다.", jobName, startupDelayMs);
+            Thread.sleep(startupDelayMs);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Transactional

@@ -48,6 +48,8 @@ openssl rand -hex 64
 KIS_ENABLED=false
 NAVER_NEWS_ENABLED=false
 OPENROUTER_ENABLED=false
+FINVIBE_MARKET_BOOTSTRAP_PRICES_RUN_ON_STARTUP=false
+FINVIBE_MARKET_CANDLE_BACKFILL_RUN_ON_STARTUP=false
 ```
 
 백엔드가 정상 기동한 뒤 하나씩 `true`로 켜는 편이 장애 원인을 찾기 쉽습니다.
