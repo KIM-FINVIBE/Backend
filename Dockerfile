@@ -9,7 +9,7 @@ FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app
 RUN groupadd --system finvibe && useradd --system --gid finvibe --home-dir /app finvibe
 COPY --from=build /workspace/build/libs/*.jar /app/app.jar
-RUN mkdir -p /app/runtime && chown -R finvibe:finvibe /app
+RUN mkdir -p /app/runtime && chown -R finvibe:finvibe /app && chmod 1777 /app/runtime
 USER finvibe
 EXPOSE 8080
 ENV SPRING_PROFILES_ACTIVE=prod
