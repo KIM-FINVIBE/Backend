@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 
@@ -46,7 +47,7 @@ public class OpenRouterTutorService {
         );
 
         Map<String, Object> payload = requestOpenRouter(requestBody);
-        String answer = extractText(payload);
+        String answer = sanitizeAnswer(extractText(payload));
         if (answer.isBlank()) {
             throw new ApiException(502, "OPENROUTER_EMPTY_RESPONSE", "OpenRouter 응답이 비어 있습니다.");
         }
@@ -110,6 +111,7 @@ public class OpenRouterTutorService {
                 한국어로 답하고, 초보자도 이해할 수 있게 짧은 문단과 예시로 설명한다.
                 내부 추론 과정, 분석 메모, 영어 메타 설명, "Okay, the user..." 같은 준비 문장은 절대 출력하지 않는다.
                 사용자가 볼 최종 답변만 한국어로 바로 말한다.
+                최종 답변은 반드시 <final>과 </final> 태그 안에만 작성한다.
                 특정 종목의 매수/매도 지시나 확정 수익 보장은 하지 않는다.
                 투자 판단은 사용자가 직접 해야 하며, 필요하면 리스크 관리와 학습 포인트를 함께 알려준다.
                 답변은 5~8문장 안에서 친절하게 마무리한다.
@@ -176,5 +178,108 @@ public class OpenRouterTutorService {
             return "";
         }
         return Maps.str((Map<String, Object>) message, "content", "").trim();
+    }
+
+    private String sanitizeAnswer(String raw) {
+        String text = raw == null ? "" : raw.trim();
+        String tagged = extractFinalTaggedAnswer(text);
+        if (!tagged.isBlank()) {
+            return tagged;
+        }
+
+        String fromDraftMarker = stripBeforeDraftMarker(text);
+        List<String> cleanedLines = new ArrayList<>();
+        boolean started = false;
+        for (String line : fromDraftMarker.split("\\R")) {
+            String trimmed = line.trim();
+            if (trimmed.isBlank()) {
+                if (started && !cleanedLines.isEmpty() && !cleanedLines.get(cleanedLines.size() - 1).isBlank()) {
+                    cleanedLines.add("");
+                }
+                continue;
+            }
+            if (!started && isMetaReasoningLine(trimmed)) {
+                continue;
+            }
+            if (!started && !containsHangul(trimmed)) {
+                continue;
+            }
+            started = true;
+            if (!isMetaReasoningLine(trimmed)) {
+                cleanedLines.add(trimmed);
+            }
+        }
+        return String.join("\n", cleanedLines).trim();
+    }
+
+    private String extractFinalTaggedAnswer(String text) {
+        String lower = text.toLowerCase(Locale.ROOT);
+        int start = lower.lastIndexOf("<final>");
+        int end = lower.lastIndexOf("</final>");
+        if (start < 0 || end <= start) {
+            return "";
+        }
+        return text.substring(start + "<final>".length(), end).trim();
+    }
+
+    private String stripBeforeDraftMarker(String text) {
+        String lower = text.toLowerCase(Locale.ROOT);
+        String[] markers = {
+                "let me draft:",
+                "now, draft:",
+                "draft:",
+                "final answer:",
+                "answer:"
+        };
+        int lastMarker = -1;
+        String selectedMarker = "";
+        for (String marker : markers) {
+            int index = lower.lastIndexOf(marker);
+            if (index > lastMarker) {
+                lastMarker = index;
+                selectedMarker = marker;
+            }
+        }
+        if (lastMarker < 0) {
+            return text;
+        }
+        return text.substring(lastMarker + selectedMarker.length()).trim();
+    }
+
+    private boolean isMetaReasoningLine(String line) {
+        String lower = line.toLowerCase(Locale.ROOT);
+        return lower.startsWith("okay,")
+                || lower.startsWith("first,")
+                || lower.startsWith("wait,")
+                || lower.startsWith("check ")
+                || lower.startsWith("also,")
+                || lower.startsWith("avoid ")
+                || lower.startsWith("start ")
+                || lower.startsWith("make sure")
+                || lower.startsWith("let me")
+                || lower.startsWith("now,")
+                || lower.startsWith("hmm,")
+                || lower.startsWith("maybe ")
+                || lower.startsWith("the user")
+                || lower.startsWith("they ")
+                || lower.startsWith("i should")
+                || lower.startsWith("i need")
+                || lower.startsWith("need ")
+                || lower.contains("the user is")
+                || lower.contains("the guidelines")
+                || lower.contains("let me recall")
+                || lower.contains("let me count")
+                || lower.contains("compliance")
+                || lower.contains("draft:");
+    }
+
+    private boolean containsHangul(String value) {
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (ch >= '가' && ch <= '힣') {
+                return true;
+            }
+        }
+        return false;
     }
 }
