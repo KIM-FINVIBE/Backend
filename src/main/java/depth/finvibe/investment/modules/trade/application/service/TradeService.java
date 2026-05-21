@@ -24,11 +24,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class TradeService {
+    private static final Logger log = LoggerFactory.getLogger(TradeService.class);
+
     private static final Set<String> ALLOWED_SIDES = Set.of("buy", "sell");
     private static final Set<String> ALLOWED_PRICE_TYPES = Set.of("market", "limit", "scheduled");
 
@@ -611,7 +615,11 @@ public class TradeService {
         );
         feed.setStockId(stock.getStockId());
         feed.setOrderId(orderId);
-        userActivityFeedRepository.save(feed);
+        try {
+            userActivityFeedRepository.save(feed);
+        } catch (Exception error) {
+            log.warn("거래 활동 피드 저장을 건너뜁니다. orderId={}, message={}", orderId, error.getMessage());
+        }
     }
 
     private void appendOrderCreatedEvent(TradeOrderEntity order, StockEntity stock, long totalKrw) {
