@@ -58,6 +58,10 @@ public class StockQueryService {
         return marketService.getStockSnapshot(toMarketStock(entity), EXCHANGE_RATE);
     }
 
+    public Map<String, Object> freshStockSnapshot(StockEntity entity) {
+        return marketService.getFreshStockSnapshot(toMarketStock(entity), EXCHANGE_RATE);
+    }
+
     public Map<String, Object> liveStockSnapshot(StockEntity entity) {
         return marketService.getLiveStockSnapshot(toMarketStock(entity), EXCHANGE_RATE);
     }

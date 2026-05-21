@@ -93,7 +93,7 @@ public class TradeService {
             throw ApiException.badRequest("INVALID_STOCK_ID", "stockId 값이 필요합니다.");
         }
         StockEntity stock = stockQueryService.requireStockEntity(stockId.trim());
-        Map<String, Object> snapshot = stockQueryService.stockSnapshot(stock);
+        Map<String, Object> snapshot = stockQueryService.freshStockSnapshot(stock);
         double marketPrice = Maps.doubleVal(snapshot, "price");
         String priceType = Maps.str(payload, "priceType", "market").toLowerCase();
         if (!ALLOWED_PRICE_TYPES.contains(priceType)) {
@@ -120,9 +120,7 @@ public class TradeService {
         }
         String autoCondition = Maps.str(payload, "autoCondition");
         BigDecimal triggerPrice = payload.get("triggerPrice") == null ? null : BigDecimal.valueOf(Maps.doubleVal(payload, "triggerPrice")).setScale(4, RoundingMode.HALF_UP);
-        String status = forcePending || "limit".equals(priceType) || "scheduled".equals(priceType) || autoCondition != null
-                ? "pending"
-                : "completed";
+        String status = resolveInitialOrderStatus(forcePending, priceType, autoCondition, side, orderPrice, stock, marketPrice);
         long totalKrw = stockQueryService.resolvePriceKrw(stock, orderPrice.multiply(quantity).doubleValue());
 
         WalletEntity wallet = walletService.requireWalletForUpdate(userId);
@@ -232,7 +230,7 @@ public class TradeService {
         }
 
         StockEntity stock = stockQueryService.requireStockEntity(order.getStockId());
-        Map<String, Object> snapshot = stockQueryService.stockSnapshot(stock);
+        Map<String, Object> snapshot = stockQueryService.freshStockSnapshot(stock);
         double marketPrice = Maps.doubleVal(snapshot, "price");
         if (marketPrice <= 0) {
             return "waiting";
@@ -336,6 +334,28 @@ public class TradeService {
         return "exec-" + UUID.randomUUID();
     }
 
+    private String resolveInitialOrderStatus(
+            boolean forcePending,
+            String priceType,
+            String autoCondition,
+            String side,
+            BigDecimal orderPrice,
+            StockEntity stock,
+            double marketPrice
+    ) {
+        if (forcePending || "scheduled".equals(priceType) || autoCondition != null) {
+            return "pending";
+        }
+        if (!"limit".equals(priceType)) {
+            return "completed";
+        }
+        if (marketPrice <= 0) {
+            return "pending";
+        }
+        double roundedMarketPrice = stockQueryService.roundPrice(stock, marketPrice);
+        return shouldExecuteLimitLikeOrder(side, orderPrice.doubleValue(), roundedMarketPrice) ? "completed" : "pending";
+    }
+
     private boolean shouldExecutePendingOrder(TradeOrderEntity order, double marketPrice) {
         String condition = order.getAutoCondition() == null ? "" : order.getAutoCondition().trim().toLowerCase();
         double threshold = order.getTriggerPrice() == null
@@ -357,8 +377,11 @@ public class TradeService {
     }
 
     private boolean shouldExecuteLimitLikeOrder(TradeOrderEntity order, double marketPrice) {
-        double orderPrice = order.getOrderPrice().doubleValue();
-        if ("buy".equals(order.getSide())) {
+        return shouldExecuteLimitLikeOrder(order.getSide(), order.getOrderPrice().doubleValue(), marketPrice);
+    }
+
+    private boolean shouldExecuteLimitLikeOrder(String side, double orderPrice, double marketPrice) {
+        if ("buy".equals(side)) {
             return marketPrice <= orderPrice;
         }
         return marketPrice >= orderPrice;
