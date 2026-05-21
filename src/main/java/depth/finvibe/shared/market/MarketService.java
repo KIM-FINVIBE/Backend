@@ -109,6 +109,34 @@ public final class MarketService {
         return metadataOnlySnapshot(stock, exchangeRate);
     }
 
+    public Map<String, Object> getFreshStockSnapshot(Map<String, Object> stock, int exchangeRate) {
+        String stockId = Maps.str(stock, "id");
+
+        Map<String, Object> live = fetchLiveStockSnapshot(stock, exchangeRate);
+        if (live != null) {
+            return live;
+        }
+
+        Map<String, Object> saved = stockPriceStore.loadLastSavedQuote(stockId);
+        if (saved != null && Maps.doubleVal(saved, "price") > 0) {
+            saved.put("dataSource", "saved");
+            saved.putIfAbsent("fetchedAt", TimeUtil.nowSeoulIso());
+            return quoteToSnapshot(stock, saved, exchangeRate);
+        }
+
+        return metadataOnlySnapshot(stock, exchangeRate);
+    }
+
+    public Map<String, Object> getSavedStockSnapshotOrMetadata(Map<String, Object> stock, int exchangeRate) {
+        Map<String, Object> saved = stockPriceStore.loadLastSavedQuote(Maps.str(stock, "id"));
+        if (saved != null && Maps.doubleVal(saved, "price") > 0) {
+            saved.put("dataSource", "saved");
+            saved.putIfAbsent("fetchedAt", TimeUtil.nowSeoulIso());
+            return quoteToSnapshot(stock, saved, exchangeRate);
+        }
+        return metadataOnlySnapshot(stock, exchangeRate);
+    }
+
     public Map<String, Object> getLiveStockSnapshot(Map<String, Object> stock, int exchangeRate) {
         Map<String, Object> live = fetchLiveStockSnapshot(stock, exchangeRate);
         if (live != null) {
@@ -171,7 +199,29 @@ public final class MarketService {
                 return stored;
             }
         }
-        if (shouldUseKisOnRequest(stock)) {
+
+        if (timeframe.endsWith("min")) {
+            try {
+                if (shouldUseKis(stock)) {
+                    List<Map<String, Object>> candles = fetchKisCandles(stock, timeframe, resolvedPoints);
+                    if (!candles.isEmpty()) {
+                        return candles;
+                    }
+                    log.warn("KIS minute candle response was empty. stockId={}, code={}, timeframe={}, points={}",
+                            stockId, Maps.str(stock, "code"), timeframe, resolvedPoints);
+                }
+            } catch (Exception e) {
+                log.warn("KIS minute candle fetch failed. stockId={}, code={}, timeframe={}, points={}",
+                        stockId, Maps.str(stock, "code"), timeframe, resolvedPoints, e);
+            }
+            List<Map<String, Object>> storedMinuteCandles = stockPriceStore.loadPriceCandles(stockId, timeframe, resolvedPoints);
+            if (!storedMinuteCandles.isEmpty()) {
+                return storedMinuteCandles;
+            }
+            return List.of();
+        }
+
+        if (isStoredCandleTimeframe(timeframe) && shouldUseKis(stock)) {
             try {
                 List<Map<String, Object>> candles = fetchKisCandles(stock, timeframe, resolvedPoints);
                 if (!candles.isEmpty()) {
@@ -184,6 +234,7 @@ public final class MarketService {
                         stockId, Maps.str(stock, "code"), timeframe, resolvedPoints, e);
             }
         }
+
         if (isStoredCandleTimeframe(timeframe)) {
             List<Map<String, Object>> stored = stockPriceStore.loadPriceCandles(stockId, timeframe, resolvedPoints);
             if (!stored.isEmpty()) {
@@ -236,6 +287,9 @@ public final class MarketService {
             }
         } else if (timeframe.endsWith("min")) {
             candles = kisClient.fetchDomesticMinuteChart(Maps.str(stock, "code"), timeframe, resolvedPoints);
+            if (!candles.isEmpty()) {
+                stockPriceStore.saveCandles(Maps.str(stock, "id"), timeframe, candles, "kis-minute");
+            }
         }
         return candles;
     }
@@ -411,7 +465,7 @@ public final class MarketService {
             }
         }
 
-        if (!config.liveKisOnRequest() || !kisClient.isEnabled()) {
+        if (!kisClient.isEnabled()) {
             return stockPriceStore.loadIndexCandles(indexCode, normalizedTimeframe, resolvedPoints);
         }
 

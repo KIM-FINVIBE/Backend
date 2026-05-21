@@ -91,8 +91,8 @@ public class MarketController {
     public Object stockDetail(@PathVariable String stockId) {
         return cache.getOrLoadMap(
                 RedisKeys.stockDetail(stockId),
-                Duration.ofSeconds(5),
-                () -> state.getStockDetail(stockId)
+                Duration.ofSeconds(3),
+                () -> state.getFreshStockDetail(stockId)
         );
     }
 
@@ -281,7 +281,7 @@ public class MarketController {
 
     @GetMapping("/market/stocks/{stockId}")
     public Object marketStockDetail(@PathVariable String stockId) {
-        return state.getStockDetail(stockId);
+        return state.getFreshStockDetail(stockId);
     }
 
     @GetMapping("/assets/top-100")

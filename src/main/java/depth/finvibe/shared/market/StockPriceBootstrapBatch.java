@@ -5,7 +5,9 @@ import depth.finvibe.shared.persistence.market.StockRepository;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -47,6 +49,9 @@ public class StockPriceBootstrapBatch {
     @Value("${finvibe.market.bootstrap-prices.max-pages-per-run:4}")
     private int maxPagesPerRun;
 
+    @Value("${finvibe.market.bootstrap-prices.priority-count:80}")
+    private int priorityCount;
+
     @Value("${finvibe.market.bootstrap-prices.request-delay-ms:150}")
     private long requestDelayMs;
 
@@ -83,7 +88,7 @@ public class StockPriceBootstrapBatch {
         });
     }
 
-    @Scheduled(cron = "${finvibe.market.bootstrap-prices.cron:0 0/10 * * * *}", zone = "Asia/Seoul")
+    @Scheduled(cron = "${finvibe.market.bootstrap-prices.cron:0 */3 * * * *}", zone = "Asia/Seoul")
     public void bootstrapOnSchedule() {
         if (!enabled || !scheduleEnabled) {
             return;
@@ -97,10 +102,8 @@ public class StockPriceBootstrapBatch {
             return;
         }
 
-        int processed = 0;
-        int updated = 0;
-        int skipped = 0;
-        int failed = 0;
+        RefreshStats stats = new RefreshStats();
+        Set<String> seenStockIds = new HashSet<>();
         int safePageSize = Math.max(1, pageSize);
         int totalPages = resolveTotalPages(safePageSize);
 
@@ -108,6 +111,8 @@ public class StockPriceBootstrapBatch {
             log.info("KRX 가격 초기화를 건너뜁니다. trigger={}, reason=no-stocks", trigger);
             return;
         }
+
+        refreshPriorityStocks(stats, seenStockIds);
 
         int pageWindow = Math.min(Math.max(1, maxPagesPerRun), totalPages);
         int startPage = nextPageCursor.getAndUpdate(current -> Math.floorMod(current + pageWindow, totalPages));
@@ -126,35 +131,10 @@ public class StockPriceBootstrapBatch {
             }
 
             for (StockEntity stock : page.getContent()) {
-                if (!shouldRefresh(stock)) {
+                if (!seenStockIds.add(stock.getStockId())) {
                     continue;
                 }
-
-                processed++;
-                try {
-                    Map<String, Object> snapshot = stockQueryService.liveStockSnapshot(stock);
-                    String source = String.valueOf(snapshot.getOrDefault("dataSource", "unknown"));
-                    double price = toDouble(snapshot.get("price"));
-                    double changeRate = toDouble(snapshot.get("changeRate"));
-                    long volume = toLong(snapshot.get("volume"));
-                    long tradeValue = toLong(snapshot.get("tradeValue"));
-
-                    if (!"kis".equals(source) || price <= 0) {
-                        skipped++;
-                        continue;
-                    }
-
-                    updateLastQuote(stock.getStockId(), price, changeRate, volume, tradeValue);
-                    updated++;
-                } catch (Exception e) {
-                    failed++;
-                    log.warn("가격 초기화 실패 stockId={}, symbol={}, message={}",
-                            stock.getStockId(), stock.getSymbol(), e.getMessage());
-                }
-
-                if (requestDelayMs > 0) {
-                    LockSupport.parkNanos(Duration.ofMillis(requestDelayMs).toNanos());
-                }
+                refreshStock(stock, stats);
             }
 
             if (!page.hasNext()) {
@@ -162,8 +142,59 @@ public class StockPriceBootstrapBatch {
             }
         }
 
-        log.info("KRX 가격 초기화 완료 trigger={}, startPage={}, pageWindow={}, totalPages={}, processed={}, updated={}, skipped={}, failed={}, refreshZeroOnly={}, staleAfterMinutes={}",
-                trigger, startPage, pageWindow, totalPages, processed, updated, skipped, failed, refreshZeroOnly, staleAfterMinutes);
+        log.info("KRX 가격 초기화 완료 trigger={}, priorityCount={}, startPage={}, pageWindow={}, totalPages={}, processed={}, updated={}, skipped={}, failed={}, refreshZeroOnly={}, staleAfterMinutes={}",
+                trigger, Math.max(0, priorityCount), startPage, pageWindow, totalPages,
+                stats.processed, stats.updated, stats.skipped, stats.failed, refreshZeroOnly, staleAfterMinutes);
+    }
+
+    private void refreshPriorityStocks(RefreshStats stats, Set<String> seenStockIds) {
+        int resolvedPriorityCount = Math.max(0, priorityCount);
+        if (resolvedPriorityCount <= 0) {
+            return;
+        }
+
+        Page<StockEntity> priorityPage = stockRepository.findByActiveTrueAndStockTypeAndMarketOrderByTradeValueDesc(
+                "domestic",
+                "KRX",
+                PageRequest.of(0, resolvedPriorityCount)
+        );
+        for (StockEntity stock : priorityPage.getContent()) {
+            if (!seenStockIds.add(stock.getStockId())) {
+                continue;
+            }
+            refreshStock(stock, stats);
+        }
+    }
+
+    private void refreshStock(StockEntity stock, RefreshStats stats) {
+        if (!shouldRefresh(stock)) {
+            return;
+        }
+
+        stats.processed++;
+        try {
+            Map<String, Object> snapshot = stockQueryService.liveStockSnapshot(stock);
+            String source = String.valueOf(snapshot.getOrDefault("dataSource", "unknown"));
+            double price = toDouble(snapshot.get("price"));
+            double changeRate = toDouble(snapshot.get("changeRate"));
+            long volume = toLong(snapshot.get("volume"));
+            long tradeValue = toLong(snapshot.get("tradeValue"));
+
+            if (!"kis".equals(source) || price <= 0) {
+                stats.skipped++;
+            } else {
+                updateLastQuote(stock.getStockId(), price, changeRate, volume, tradeValue);
+                stats.updated++;
+            }
+        } catch (Exception e) {
+            stats.failed++;
+            log.warn("가격 초기화 실패 stockId={}, symbol={}, message={}",
+                    stock.getStockId(), stock.getSymbol(), e.getMessage());
+        } finally {
+            if (requestDelayMs > 0) {
+                LockSupport.parkNanos(Duration.ofMillis(requestDelayMs).toNanos());
+            }
+        }
     }
 
     private void sleepBeforeStartup(String jobName) {
@@ -259,5 +290,12 @@ public class StockPriceBootstrapBatch {
         } catch (Exception ignored) {
             return 0L;
         }
+    }
+
+    private static final class RefreshStats {
+        private int processed;
+        private int updated;
+        private int skipped;
+        private int failed;
     }
 }

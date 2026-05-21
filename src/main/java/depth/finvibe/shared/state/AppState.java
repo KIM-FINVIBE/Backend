@@ -277,12 +277,12 @@ public final class AppState {
                 continue;
             }
             rememberRankingStock(linkedStock, seenStockIds, seenCodes);
-            Map<String, Object> live = stockSnapshot(linkedStock);
-            double price = Maps.doubleVal(live, "price");
-            double priceKrw = Maps.doubleVal(live, "priceKrw");
-            double changeRate = Maps.doubleVal(live, "changeRate");
-            long volume = Maps.longVal(live.get("volume"), 0L);
-            long tradeValue = Maps.longVal(live.get("tradeValue"), 0L);
+            Map<String, Object> saved = savedStockSnapshot(linkedStock);
+            double price = Maps.doubleVal(saved, "price");
+            double priceKrw = Maps.doubleVal(saved, "priceKrw");
+            double changeRate = Maps.doubleVal(saved, "changeRate");
+            long volume = Maps.longVal(saved.get("volume"), 0L);
+            long tradeValue = Maps.longVal(saved.get("tradeValue"), 0L);
             if (tradeValue <= 0 && priceKrw > 0 && volume > 0) {
                 tradeValue = Math.round(priceKrw * volume);
             }
@@ -597,7 +597,11 @@ public final class AppState {
     }
 
     public Map<String, Object> getStockDetail(String stockId) {
-        return stockSnapshot(stockId);
+        return savedStockSnapshot(stockId);
+    }
+
+    public Map<String, Object> getFreshStockDetail(String stockId) {
+        return freshStockSnapshot(resolveStockForMarketData(stockId));
     }
 
     public List<Map<String, Object>> getStockCandles(String stockId, String timeframe, Integer points) {
@@ -644,7 +648,7 @@ public final class AppState {
         Map<String, Object> owned = getOwnedStock(stockId);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("updatedAt", TimeUtil.nowSeoulIso());
-        result.put("stock", getStockDetail(stockId));
+        result.put("stock", getFreshStockDetail(stockId));
         result.put("chartData", getStockCandles(stockId, timeframe, null));
         result.put("orderBook", getOrderBook(stockId));
         result.put("wallet", getWalletSummary());
@@ -1239,6 +1243,18 @@ public final class AppState {
 
     public Map<String, Object> stockSnapshot(Map<String, Object> stock) {
         return marketService.getStockSnapshot(stock, exchangeRate);
+    }
+
+    public Map<String, Object> savedStockSnapshot(String identifier) {
+        return savedStockSnapshot(resolveStockForMarketData(identifier));
+    }
+
+    public Map<String, Object> savedStockSnapshot(Map<String, Object> stock) {
+        return marketService.getSavedStockSnapshotOrMetadata(stock, exchangeRate);
+    }
+
+    public Map<String, Object> freshStockSnapshot(Map<String, Object> stock) {
+        return marketService.getFreshStockSnapshot(stock, exchangeRate);
     }
 
     private List<StockEntity> listStockEntities(String market) {

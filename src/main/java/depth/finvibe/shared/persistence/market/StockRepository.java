@@ -65,4 +65,28 @@ public interface StockRepository extends JpaRepository<StockEntity, String> {
             @Param("market") String market,
             Pageable pageable
     );
+
+    @Query(
+        value = """
+            SELECT *
+            FROM stocks
+            WHERE is_active = 1
+              AND stock_type = :stockType
+              AND market = :market
+            ORDER BY last_trade_value_krw DESC, last_volume DESC, symbol ASC
+            """,
+        countQuery = """
+            SELECT COUNT(*)
+            FROM stocks
+            WHERE is_active = 1
+              AND stock_type = :stockType
+              AND market = :market
+            """,
+        nativeQuery = true
+    )
+    Page<StockEntity> findByActiveTrueAndStockTypeAndMarketOrderByTradeValueDesc(
+            @Param("stockType") String stockType,
+            @Param("market") String market,
+            Pageable pageable
+    );
 }
