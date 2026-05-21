@@ -193,10 +193,11 @@ public final class MarketService {
     public List<Map<String, Object>> getCandles(Map<String, Object> stock, String timeframe, Integer points) {
         int resolvedPoints = points == null ? FinvibeUtils.getDefaultPoints(timeframe) : points;
         String stockId = Maps.str(stock, "id");
+        List<Map<String, Object>> stored = List.of();
         if (isStoredCandleTimeframe(timeframe)) {
-            List<Map<String, Object>> stored = stockPriceStore.loadPriceCandles(stockId, timeframe, resolvedPoints);
-            if (stored.size() >= Math.min(resolvedPoints, 5)) {
-                return stored;
+            stored = stockPriceStore.loadPriceCandles(stockId, timeframe, resolvedPoints);
+            if (stored.size() >= Math.min(resolvedPoints, 5) && storedCandlesAreFresh(stored, timeframe)) {
+                return mergeLatestQuoteIntoCandles(stock, timeframe, stored, resolvedPoints);
             }
         }
 
@@ -225,7 +226,7 @@ public final class MarketService {
             try {
                 List<Map<String, Object>> candles = fetchKisCandles(stock, timeframe, resolvedPoints);
                 if (!candles.isEmpty()) {
-                    return candles;
+                    return mergeLatestQuoteIntoCandles(stock, timeframe, candles, resolvedPoints);
                 }
                 log.warn("KIS candle response was empty. stockId={}, code={}, timeframe={}, points={}",
                         stockId, Maps.str(stock, "code"), timeframe, resolvedPoints);
@@ -236,9 +237,8 @@ public final class MarketService {
         }
 
         if (isStoredCandleTimeframe(timeframe)) {
-            List<Map<String, Object>> stored = stockPriceStore.loadPriceCandles(stockId, timeframe, resolvedPoints);
             if (!stored.isEmpty()) {
-                return stored;
+                return mergeLatestQuoteIntoCandles(stock, timeframe, stored, resolvedPoints);
             }
         }
         if (isStoredCandleTimeframe(timeframe)) {
@@ -254,12 +254,137 @@ public final class MarketService {
             );
             if (!storedCandles.isEmpty()) {
                 if ("day".equals(timeframe)) {
-                    return storedCandles;
+                    return mergeLatestQuoteIntoCandles(stock, timeframe, storedCandles, resolvedPoints);
                 }
-                return aggregateCandles(storedCandles, timeframe, resolvedPoints, stockId);
+                return mergeLatestQuoteIntoCandles(stock, timeframe, aggregateCandles(storedCandles, timeframe, resolvedPoints, stockId), resolvedPoints);
             }
         }
         return List.of();
+    }
+
+    private boolean storedCandlesAreFresh(List<Map<String, Object>> candles, String timeframe) {
+        LocalDate latestDate = latestCandleDate(candles);
+        if (latestDate == null) {
+            return false;
+        }
+        ZonedDateTime now = TimeUtil.nowSeoul();
+        LocalDate minimumFreshDate = switch (timeframe) {
+            case "day" -> expectedLatestDailyCandleDate(now);
+            case "week" -> now.toLocalDate().minusDays(7);
+            case "month" -> now.toLocalDate().minusDays(31);
+            case "year" -> now.toLocalDate().minusDays(370);
+            default -> now.toLocalDate();
+        };
+        return !latestDate.isBefore(minimumFreshDate);
+    }
+
+    private List<Map<String, Object>> mergeLatestQuoteIntoCandles(
+            Map<String, Object> stock,
+            String timeframe,
+            List<Map<String, Object>> candles,
+            int points
+    ) {
+        if (!"day".equals(timeframe) || candles == null || candles.isEmpty()) {
+            return candles == null ? List.of() : candles;
+        }
+
+        String stockId = Maps.str(stock, "id");
+        Map<String, Object> quote = stockPriceStore.loadLastSavedQuote(stockId);
+        if (quote == null) {
+            return candles;
+        }
+        double latestPrice = Maps.doubleVal(quote, "price");
+        if (latestPrice <= 0) {
+            return candles;
+        }
+
+        LocalDate quoteDate = parseCandleDate(quote.get("fetchedAt"));
+        LocalDate lastCandleDate = latestCandleDate(candles);
+        if (quoteDate == null || lastCandleDate == null || quoteDate.isBefore(lastCandleDate)) {
+            return candles;
+        }
+
+        List<Map<String, Object>> merged = new ArrayList<>(candles);
+        Map<String, Object> last = new LinkedHashMap<>(merged.get(merged.size() - 1));
+        double previousClose = Maps.doubleVal(last, "close", latestPrice);
+        double open = Maps.doubleVal(quote, "open", quoteDate.equals(lastCandleDate)
+                ? Maps.doubleVal(last, "open", previousClose)
+                : previousClose);
+        double existingHigh = Maps.doubleVal(last, "high", Math.max(open, previousClose));
+        double existingLow = Maps.doubleVal(last, "low", Math.min(open, previousClose));
+        double high = Math.max(Math.max(open, latestPrice), Maps.doubleVal(quote, "high", existingHigh));
+        double low = Math.min(Math.min(open, latestPrice), Maps.doubleVal(quote, "low", existingLow));
+        long volume = Maps.longVal(quote.get("volume"), Maps.longVal(last.get("volume"), 0L));
+        long tradeValue = Maps.longVal(quote.get("tradeValue"), Maps.longVal(last.get("value"), Math.round(latestPrice * volume)));
+
+        Map<String, Object> liveCandle = new LinkedHashMap<>();
+        liveCandle.put("stockId", stockId);
+        liveCandle.put("timeframe", "DAY");
+        liveCandle.put("at", quoteDate.atStartOfDay(TimeUtil.SEOUL).toString());
+        liveCandle.put("open", open);
+        liveCandle.put("high", high);
+        liveCandle.put("low", low);
+        liveCandle.put("close", latestPrice);
+        liveCandle.put("volume", volume);
+        liveCandle.put("value", tradeValue);
+        liveCandle.put("prevDayChangePct", Maps.doubleVal(quote, "changeRate"));
+        liveCandle.put("dataSource", quoteDate.equals(lastCandleDate) ? "latest_quote_update" : "latest_quote");
+
+        if (quoteDate.equals(lastCandleDate)) {
+            merged.set(merged.size() - 1, liveCandle);
+        } else {
+            merged.add(liveCandle);
+        }
+
+        int fromIndex = Math.max(0, merged.size() - Math.max(1, points));
+        return new ArrayList<>(merged.subList(fromIndex, merged.size()));
+    }
+
+    private LocalDate latestCandleDate(List<Map<String, Object>> candles) {
+        if (candles == null || candles.isEmpty()) {
+            return null;
+        }
+        for (int i = candles.size() - 1; i >= 0; i--) {
+            LocalDate parsed = parseCandleDate(candles.get(i).get("at"));
+            if (parsed != null) {
+                return parsed;
+            }
+        }
+        return null;
+    }
+
+    private LocalDate parseCandleDate(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String text = String.valueOf(value).trim();
+        if (text.isBlank()) {
+            return null;
+        }
+        try {
+            return ZonedDateTime.parse(text).withZoneSameInstant(TimeUtil.SEOUL).toLocalDate();
+        } catch (Exception ignored) {
+        }
+        try {
+            return java.time.LocalDateTime.parse(text).toLocalDate();
+        } catch (Exception ignored) {
+        }
+        try {
+            return LocalDate.parse(text);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private LocalDate expectedLatestDailyCandleDate(ZonedDateTime now) {
+        LocalDate date = now.toLocalDate();
+        if (now.getHour() < 9) {
+            date = date.minusDays(1);
+        }
+        while (date.getDayOfWeek() == DayOfWeek.SATURDAY || date.getDayOfWeek() == DayOfWeek.SUNDAY) {
+            date = date.minusDays(1);
+        }
+        return date;
     }
 
     public List<Map<String, Object>> refreshStoredCandles(Map<String, Object> stock, String timeframe, int points) {
