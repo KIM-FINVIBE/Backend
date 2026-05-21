@@ -8,8 +8,6 @@ import depth.finvibe.shared.persistence.investment.AssetEntity;
 import depth.finvibe.shared.persistence.investment.AssetRepository;
 import depth.finvibe.shared.persistence.investment.WalletEntity;
 import depth.finvibe.shared.persistence.market.StockEntity;
-import depth.finvibe.shared.persistence.mongo.feed.UserActivityFeedDocument;
-import depth.finvibe.shared.persistence.mongo.feed.UserActivityFeedRepository;
 import depth.finvibe.shared.persistence.trade.TradeExecutionEntity;
 import depth.finvibe.shared.persistence.trade.TradeExecutionRepository;
 import depth.finvibe.shared.persistence.trade.TradeOrderEntity;
@@ -24,15 +22,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.Set;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class TradeService {
-    private static final Logger log = LoggerFactory.getLogger(TradeService.class);
-
     private static final Set<String> ALLOWED_SIDES = Set.of("buy", "sell");
     private static final Set<String> ALLOWED_PRICE_TYPES = Set.of("market", "limit", "scheduled");
 
@@ -42,7 +36,6 @@ public class TradeService {
     private final WalletService walletService;
     private final StockQueryService stockQueryService;
     private final OutboxJdbcRepository outboxJdbcRepository;
-    private final UserActivityFeedRepository userActivityFeedRepository;
 
     public TradeService(
             TradeOrderRepository tradeOrderRepository,
@@ -50,8 +43,7 @@ public class TradeService {
             AssetRepository assetRepository,
             WalletService walletService,
             StockQueryService stockQueryService,
-            OutboxJdbcRepository outboxJdbcRepository,
-            UserActivityFeedRepository userActivityFeedRepository
+            OutboxJdbcRepository outboxJdbcRepository
     ) {
         this.tradeOrderRepository = tradeOrderRepository;
         this.tradeExecutionRepository = tradeExecutionRepository;
@@ -59,7 +51,6 @@ public class TradeService {
         this.walletService = walletService;
         this.stockQueryService = stockQueryService;
         this.outboxJdbcRepository = outboxJdbcRepository;
-        this.userActivityFeedRepository = userActivityFeedRepository;
     }
 
     public List<Map<String, Object>> listOrders(String userId, String status, String kind) {
@@ -491,7 +482,6 @@ public class TradeService {
         tradeExecutionRepository.save(execution);
 
         walletService.writeLedger(wallet, userId, "BUY_SETTLEMENT", "OUT", totalKrw, "ORDER", orderId, stock.getNameKr() + " 매수 체결");
-        appendTradeFeed(userId, stock, orderId, "buy", quantity);
     }
 
     private void settleReservedBuy(WalletEntity wallet, String userId, StockEntity stock, BigDecimal orderPrice, BigDecimal quantity, long totalKrw, TradeOrderEntity order) {
@@ -549,7 +539,6 @@ public class TradeService {
         tradeExecutionRepository.save(execution);
 
         walletService.writeLedger(wallet, userId, "BUY_SETTLEMENT", "OUT", totalKrw, "ORDER", order.getOrderId(), stock.getNameKr() + " 예약 매수 체결");
-        appendTradeFeed(userId, stock, order.getOrderId(), "buy", quantity);
     }
 
     private void settlePendingSell(WalletEntity wallet, String userId, StockEntity stock, BigDecimal orderPrice, BigDecimal quantity, long totalKrw, TradeOrderEntity order) {
@@ -601,25 +590,6 @@ public class TradeService {
         tradeExecutionRepository.save(execution);
 
         walletService.writeLedger(wallet, userId, "SELL_SETTLEMENT", "IN", totalKrw, "ORDER", orderId, stock.getNameKr() + " 매도 체결");
-        appendTradeFeed(userId, stock, orderId, "sell", quantity);
-    }
-
-    private void appendTradeFeed(String userId, StockEntity stock, String orderId, String side, BigDecimal quantity) {
-        UserActivityFeedDocument feed = new UserActivityFeedDocument();
-        feed.setUserId(userId);
-        feed.setType("TRADE_EXECUTED");
-        feed.setTitle("buy".equals(side) ? "매수 체결" : "매도 체결");
-        feed.setDescription(
-                stock.getNameKr() + " " + quantity.stripTrailingZeros().toPlainString() + "주 "
-                        + ("buy".equals(side) ? "매수 체결" : "매도 체결")
-        );
-        feed.setStockId(stock.getStockId());
-        feed.setOrderId(orderId);
-        try {
-            userActivityFeedRepository.save(feed);
-        } catch (Exception error) {
-            log.warn("거래 활동 피드 저장을 건너뜁니다. orderId={}, message={}", orderId, error.getMessage());
-        }
     }
 
     private void appendOrderCreatedEvent(TradeOrderEntity order, StockEntity stock, long totalKrw) {
