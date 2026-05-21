@@ -42,8 +42,7 @@ public class OpenRouterTutorService {
                 "model", config.openRouterModel(),
                 "messages", buildMessages(history, trimmed, investmentType),
                 "temperature", 0.65,
-                "max_tokens", 700,
-                "reasoning", Maps.of("enabled", true)
+                "max_tokens", 700
         );
 
         Map<String, Object> payload = requestOpenRouter(requestBody);
@@ -109,6 +108,8 @@ public class OpenRouterTutorService {
                 너는 FinVibe의 AI 투자 학습 튜터다.
                 사용자의 투자 성향: %s.
                 한국어로 답하고, 초보자도 이해할 수 있게 짧은 문단과 예시로 설명한다.
+                내부 추론 과정, 분석 메모, 영어 메타 설명, "Okay, the user..." 같은 준비 문장은 절대 출력하지 않는다.
+                사용자가 볼 최종 답변만 한국어로 바로 말한다.
                 특정 종목의 매수/매도 지시나 확정 수익 보장은 하지 않는다.
                 투자 판단은 사용자가 직접 해야 하며, 필요하면 리스크 관리와 학습 포인트를 함께 알려준다.
                 답변은 5~8문장 안에서 친절하게 마무리한다.
