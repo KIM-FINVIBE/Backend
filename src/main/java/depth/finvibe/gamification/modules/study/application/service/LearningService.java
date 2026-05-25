@@ -413,6 +413,26 @@ public class LearningService {
     }
 
     @Transactional
+    public Map<String, Object> createSquad(String userId, String squadName, String region) {
+        ensureLearningInitialized(userId);
+        Map<String, Object> squad = appState.createSquad(squadName, region);
+        String squadId = Maps.str(squad, "id");
+
+        UserSquadMembershipEntity membership = squadMembershipRepository.findById(userId)
+                .orElseGet(() -> {
+                    UserSquadMembershipEntity created = new UserSquadMembershipEntity();
+                    created.setUserId(userId);
+                    return created;
+                });
+        membership.setSquadId(squadId);
+        squadMembershipRepository.save(membership);
+        if (findChallengeDefinition("challenge-squad").isPresent()) {
+            completeChallenge(userId, "challenge-squad");
+        }
+        return toSquadMap(squad, squadId);
+    }
+
+    @Transactional
     public Map<String, Object> joinSquad(String userId, String squadId) {
         ensureLearningInitialized(userId);
         Map<String, Object> squad = requireSquadDefinition(squadId);

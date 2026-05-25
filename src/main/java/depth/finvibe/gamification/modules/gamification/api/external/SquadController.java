@@ -4,9 +4,11 @@ import depth.finvibe.gamification.modules.study.application.service.LearningServ
 import depth.finvibe.shared.security.AuthService;
 import depth.finvibe.shared.security.CurrentUser;
 import depth.finvibe.shared.util.Maps;
+import java.util.Map;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -29,6 +31,21 @@ public class SquadController {
     @GetMapping("/squads")
     public Object squadsAlias(@RequestHeader(name = "Authorization", required = false) String authorization) {
         return squads(authorization);
+    }
+
+    @PostMapping("/api/v1/learning/squads")
+    public Object createSquad(@RequestBody Map<String, Object> request,
+                              @RequestHeader(name = "Authorization", required = false) String authorization) {
+        CurrentUser currentUser = authService.requireUser(authorization);
+        String squadName = Maps.str(request, "squadName", Maps.str(request, "name", ""));
+        String region = Maps.str(request, "region", "");
+        return Maps.of("message", "학교가 생성되었습니다.", "squad", learningService.createSquad(currentUser.userId(), squadName, region));
+    }
+
+    @PostMapping("/squads")
+    public Object createSquadAlias(@RequestBody Map<String, Object> request,
+                                   @RequestHeader(name = "Authorization", required = false) String authorization) {
+        return createSquad(request, authorization);
     }
 
     @GetMapping("/api/v1/learning/squads/me")

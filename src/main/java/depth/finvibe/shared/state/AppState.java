@@ -22,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 public final class AppState {
     private final Object lock = new Object();
@@ -1107,6 +1108,35 @@ public final class AppState {
     public Map<String, Object> squadMe() {
         synchronized (lock) {
             return copyMap(squads.get(0));
+        }
+    }
+
+    public Map<String, Object> createSquad(String squadName, String region) {
+        synchronized (lock) {
+            String normalizedName = squadName == null ? "" : squadName.trim();
+            String normalizedRegion = region == null ? "" : region.trim();
+            if (normalizedName.isBlank()) {
+                throw ApiException.badRequest("SQUAD_NAME_REQUIRED", "학교 이름을 입력해 주세요.");
+            }
+
+            for (Map<String, Object> squad : squads) {
+                if (normalizedName.equalsIgnoreCase(Maps.str(squad, "name", ""))) {
+                    throw ApiException.badRequest("SQUAD_ALREADY_EXISTS", "이미 등록된 학교입니다.");
+                }
+            }
+
+            Map<String, Object> squad = mapOf(
+                    "id", "squad-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12),
+                    "name", normalizedName,
+                    "members", 0,
+                    "groupReturnRate", 0.0
+            );
+            if (!normalizedRegion.isBlank()) {
+                squad.put("region", normalizedRegion);
+            }
+            squads.add(0, squad);
+            persist();
+            return copyMap(squad);
         }
     }
 
