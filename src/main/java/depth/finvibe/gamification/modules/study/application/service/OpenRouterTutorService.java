@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 public class OpenRouterTutorService {
     private static final int MAX_MESSAGE_LENGTH = 1200;
     private static final int MAX_HISTORY_ITEMS = 10;
+    private static final int MAX_RESPONSE_TOKENS = 1800;
 
     private final AppConfig config;
     private final HttpClient client;
@@ -43,7 +44,7 @@ public class OpenRouterTutorService {
                 "model", config.openRouterModel(),
                 "messages", buildMessages(history, trimmed, investmentType),
                 "temperature", 0.65,
-                "max_tokens", 700
+                "max_tokens", MAX_RESPONSE_TOKENS
         );
 
         Map<String, Object> payload = requestOpenRouter(requestBody);
@@ -114,7 +115,8 @@ public class OpenRouterTutorService {
                 최종 답변은 반드시 <final>과 </final> 태그 안에만 작성한다.
                 특정 종목의 매수/매도 지시나 확정 수익 보장은 하지 않는다.
                 투자 판단은 사용자가 직접 해야 하며, 필요하면 리스크 관리와 학습 포인트를 함께 알려준다.
-                답변은 5~8문장 안에서 친절하게 마무리한다.
+                답변은 5~8문장 안에서 완결된 문장으로 친절하게 마무리한다.
+                마지막 문장은 반드시 자연스럽게 끝내고, 문장 중간에서 끊긴 답변을 만들지 않는다.
                 """.formatted(typeLabel);
     }
 
