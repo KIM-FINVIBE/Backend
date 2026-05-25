@@ -25,6 +25,8 @@ import java.util.Set;
 import java.util.UUID;
 
 public final class AppState {
+    private static final Set<String> SEEDED_SQUAD_IDS = Set.of("squad-1", "squad-2", "squad-3");
+
     private final Object lock = new Object();
     private final Path runtimeFile;
     private final MarketService marketService;
@@ -1105,6 +1107,18 @@ public final class AppState {
         }
     }
 
+    public List<Map<String, Object>> listCreatedSquads() {
+        synchronized (lock) {
+            List<Map<String, Object>> rows = new ArrayList<>();
+            for (Map<String, Object> squad : squads) {
+                if (isCreatedSquad(squad)) {
+                    rows.add(copyMap(squad));
+                }
+            }
+            return rows;
+        }
+    }
+
     public Map<String, Object> squadMe() {
         synchronized (lock) {
             return copyMap(squads.get(0));
@@ -1126,10 +1140,11 @@ public final class AppState {
             }
 
             Map<String, Object> squad = mapOf(
-                    "id", "squad-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12),
+                    "id", "school-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12),
                     "name", normalizedName,
                     "members", 0,
-                    "groupReturnRate", 0.0
+                    "groupReturnRate", 0.0,
+                    "created", true
             );
             if (!normalizedRegion.isBlank()) {
                 squad.put("region", normalizedRegion);
@@ -1138,6 +1153,14 @@ public final class AppState {
             persist();
             return copyMap(squad);
         }
+    }
+
+    private boolean isCreatedSquad(Map<String, Object> squad) {
+        if (Boolean.TRUE.equals(squad.get("created"))) {
+            return true;
+        }
+        String squadId = Maps.str(squad, "id", "");
+        return !SEEDED_SQUAD_IDS.contains(squadId);
     }
 
     public List<Map<String, Object>> listBadges() {

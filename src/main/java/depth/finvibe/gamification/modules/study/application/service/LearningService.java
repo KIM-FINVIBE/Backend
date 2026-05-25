@@ -396,7 +396,7 @@ public class LearningService {
                 .map(UserSquadMembershipEntity::getSquadId)
                 .orElse(null);
         List<Map<String, Object>> rows = new ArrayList<>();
-        for (Map<String, Object> squad : appState.listSquads()) {
+        for (Map<String, Object> squad : appState.listCreatedSquads()) {
             rows.add(toSquadMap(squad, joinedSquadId));
         }
         return rows;
@@ -452,34 +452,55 @@ public class LearningService {
 
     @Transactional
     public List<Map<String, Object>> xpSquadsRanking() {
-        Map<String, Map<String, Object>> definitionsById = squadDefinitionsById();
-        Map<String, UserSquadMembershipEntity> membershipByUserId = squadMembershipRepository.findAll()
-                .stream()
-                .collect(Collectors.toMap(UserSquadMembershipEntity::getUserId, membership -> membership, (first, second) -> first));
+        Map<String, Map<String, Object>> returnRankingByUserId = new LinkedHashMap<>();
+        for (Map<String, Object> ranking : profitSnapshotDailyService.rankUsersByStockReturn(List.of())) {
+            returnRankingByUserId.put(Maps.str(ranking, "userId"), ranking);
+        }
 
         List<Map<String, Object>> rows = new ArrayList<>();
-        for (Map<String, Object> ranking : profitSnapshotDailyService.rankUsersByStockReturn(List.of())) {
-            String rankedUserId = Maps.str(ranking, "userId");
-            UserSquadMembershipEntity membership = membershipByUserId.get(rankedUserId);
-            String joinedSquadId = membership == null ? null : membership.getSquadId();
-            Map<String, Object> squad = joinedSquadId == null ? null : definitionsById.get(joinedSquadId);
-            double returnRate = Maps.doubleVal(ranking, "totalReturnRate");
+        for (Map<String, Object> squad : appState.listCreatedSquads()) {
+            String squadId = Maps.str(squad, "id");
+            List<UserSquadMembershipEntity> memberships = squadMembershipRepository.findAllBySquadId(squadId);
+            double totalReturnRate = 0.0;
+            int rankedMembers = 0;
 
-            Map<String, Object> row = new LinkedHashMap<>(ranking);
-            row.put("squadId", rankedUserId);
-            row.put("squadName", Maps.str(ranking, "nickname", "Unknown"));
-            row.put("joinedSquadId", joinedSquadId);
-            row.put("joinedSquadName", squad == null ? null : Maps.str(squad, "name"));
+            for (UserSquadMembershipEntity membership : memberships) {
+                Map<String, Object> ranking = returnRankingByUserId.get(membership.getUserId());
+                if (ranking == null) {
+                    continue;
+                }
+                totalReturnRate += Maps.doubleVal(ranking, "totalReturnRate");
+                rankedMembers++;
+            }
+
+            double returnRate = rankedMembers == 0
+                    ? 0.0
+                    : Math.round((totalReturnRate / rankedMembers) * 100.0) / 100.0;
+
+            Map<String, Object> row = new LinkedHashMap<>(squad);
+            row.put("squadId", squadId);
+            row.put("squadName", Maps.str(squad, "name"));
+            row.put("members", memberships.size());
+            row.put("rankedMembers", rankedMembers);
             row.put("groupReturnRate", returnRate);
+            row.put("returnRate", returnRate);
             row.put("weeklyXpChangeRate", returnRate);
             row.put("rankingChange", 0);
             row.put("scoreType", "stockReturnRate");
             row.put("score", returnRate);
-            row.put("xp", Math.round(returnRate * 100.0) / 100.0);
-            row.put("weeklyXp", Math.round(returnRate * 100.0) / 100.0);
-            row.put("totalXp", Math.round(returnRate * 100.0) / 100.0);
-            row.put("members", joinedSquadId == null ? 0 : squadMembershipRepository.countBySquadId(joinedSquadId));
+            row.put("xp", returnRate);
+            row.put("weeklyXp", returnRate);
+            row.put("totalXp", returnRate);
             rows.add(row);
+        }
+        rows.sort(Comparator
+                .comparingDouble((Map<String, Object> row) -> Maps.doubleVal(row, "returnRate"))
+                .reversed()
+                .thenComparing(row -> Maps.str(row, "squadName", "")));
+        for (int i = 0; i < rows.size(); i++) {
+            rows.get(i).put("rank", i + 1);
+            rows.get(i).put("ranking", i + 1);
+            rows.get(i).put("currentRanking", i + 1);
         }
         return rows;
     }
