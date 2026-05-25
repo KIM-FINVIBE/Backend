@@ -48,7 +48,14 @@ public class OpenRouterTutorService {
         );
 
         Map<String, Object> payload = requestOpenRouter(requestBody);
-        String answer = sanitizeAnswer(extractText(payload));
+        String rawAnswer = extractText(payload);
+        String answer = sanitizeAnswer(rawAnswer);
+        if (isInvalidKoreanAnswer(answer)) {
+            answer = sanitizeAnswer(extractText(requestOpenRouter(koreanRewriteBody(rawAnswer))));
+        }
+        if (isInvalidKoreanAnswer(answer)) {
+            answer = "AI 튜터 응답이 한국어로 생성되지 않았습니다. 질문을 한 번만 다시 보내 주세요.";
+        }
         if (answer.isBlank()) {
             throw new ApiException(502, "OPENROUTER_EMPTY_RESPONSE", "OpenRouter 응답이 비어 있습니다.");
         }
@@ -109,7 +116,9 @@ public class OpenRouterTutorService {
         return """
                 너는 FinVibe의 AI 투자 학습 튜터다.
                 사용자의 투자 성향: %s.
-                한국어로 답하고, 초보자도 이해할 수 있게 짧은 문단과 예시로 설명한다.
+                반드시 한국어로만 답하고, 초보자도 이해할 수 있게 짧은 문단과 예시로 설명한다.
+                중국어, 일본어, 영어 문장, 번체자, 간체자는 절대 출력하지 않는다.
+                영어는 KOSPI, ETF, PER, PBR 같은 금융 약어가 꼭 필요할 때만 최소한으로 쓴다.
                 내부 추론 과정, 분석 메모, 영어 메타 설명, "Okay, the user..." 같은 준비 문장은 절대 출력하지 않는다.
                 사용자가 볼 최종 답변만 한국어로 바로 말한다.
                 최종 답변은 반드시 <final>과 </final> 태그 안에만 작성한다.
@@ -118,6 +127,24 @@ public class OpenRouterTutorService {
                 답변은 5~8문장 안에서 완결된 문장으로 친절하게 마무리한다.
                 마지막 문장은 반드시 자연스럽게 끝내고, 문장 중간에서 끊긴 답변을 만들지 않는다.
                 """.formatted(typeLabel);
+    }
+
+    private Map<String, Object> koreanRewriteBody(String rawAnswer) {
+        return Maps.of(
+                "model", config.openRouterModel(),
+                "messages", List.of(
+                        message("system", """
+                                너는 FinVibe의 한국어 교정기다.
+                                입력된 답변을 의미만 유지해서 자연스러운 한국어로 다시 작성한다.
+                                중국어, 일본어, 영어 문장, 내부 추론, 메타 설명은 모두 제거한다.
+                                최종 답변은 반드시 <final>과 </final> 태그 안에만 작성한다.
+                                5~8문장의 완결된 한국어 답변만 출력한다.
+                                """),
+                        message("user", rawAnswer == null ? "" : rawAnswer)
+                ),
+                "temperature", 0.2,
+                "max_tokens", MAX_RESPONSE_TOKENS
+        );
     }
 
     private Map<String, Object> requestOpenRouter(Map<String, Object> body) {
@@ -283,5 +310,37 @@ public class OpenRouterTutorService {
             }
         }
         return false;
+    }
+
+    private boolean isInvalidKoreanAnswer(String value) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        int hangul = 0;
+        int cjk = 0;
+        int latinLetters = 0;
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (ch >= '가' && ch <= '힣') {
+                hangul++;
+            } else if (isChineseOrJapanese(ch)) {
+                cjk++;
+            } else if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
+                latinLetters++;
+            }
+        }
+        if (hangul == 0) {
+            return true;
+        }
+        return cjk > 0 || latinLetters > Math.max(40, hangul / 3);
+    }
+
+    private boolean isChineseOrJapanese(char ch) {
+        Character.UnicodeBlock block = Character.UnicodeBlock.of(ch);
+        return block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS
+                || block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A
+                || block == Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS
+                || block == Character.UnicodeBlock.HIRAGANA
+                || block == Character.UnicodeBlock.KATAKANA;
     }
 }
